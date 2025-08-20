@@ -1,0 +1,14 @@
+ISSUES/AMBIGUITIES IN CIF definitions
+
+
+##  same fields ??  ##
+_diffrn.crystal_support   
+_diffrn_measurement.specimen_support
+
+
+
+
+
+##  deprecated but no replacement ?  ##
+
+

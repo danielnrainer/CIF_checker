@@ -1,5 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
 *.pyc
-cif_core.dic
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec.backup
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing and temporary files
+test_*.py
+*_test.py
+quick_test.py
+regex_test.py
+temp_*.py
+
+# OS
+.DS_Store
+Thumbs.db
+
+# CIF Checker specific
+*.cif.backup
+*.cif.temp
+temp_cif_files/
 IMPLEMENTATION_SUMMARY.md
-src/gui/field_definitions_issues.cif_defs
-src/gui/field_definitions_all.cif_defs
+
+# Build artifacts
+CIF_Checker_v2.exe
+CIF_checker.exe
+
+# Generated field definition files (keep in repo but track changes)
+# src/gui/field_definitions_issues.cif_defs
+# src/gui/field_definitions_all.cif_defs

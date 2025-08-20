@@ -1,13 +1,14 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit, 
                            QPushButton, QVBoxLayout, QHBoxLayout, QMenu,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
-                           QDialog, QLabel, QFontDialog)
+                           QDialog, QLabel, QFontDialog, QScrollArea, QFrame)
 from PyQt6.QtCore import Qt, QRegularExpression
 from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
                         QFontMetrics, QTextCursor, QTextDocument)
 import os
 import json
-from utils.CIF_field_parsing import CIFFieldChecker
+from utils.cif_analyzer import CIFAnalyzer, CIFVersion, CrystallographyMethod
+from utils.cif_dictionary_manager import CIFDictionaryManager
 from utils.CIF_parser import CIFParser
 
 
@@ -20,11 +21,11 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         super().__init__(parent)
         self.highlighting_rules = []
         
-        # Field names (starting with _)
+        # Field names (starting with _) - only at the beginning of lines
         self.field_format = QTextCharFormat()
         self.field_format.setForeground(QColor("#0000FF"))  # Blue
         self.highlighting_rules.append((
-            QRegularExpression(r'_\w+(?:\.\w+)*'),
+            QRegularExpression(r'^\s*_[^\s]+'),
             self.field_format
         ))
         
@@ -192,14 +193,13 @@ class CIFEditor(QMainWindow):
         self.recent_files = []
         self.max_recent_files = 5
         
-        # Initialize field checker and CIF parser
-        self.field_checker = CIFFieldChecker()
+        # Initialize modern CIF analysis system
+        self.dict_manager = CIFDictionaryManager()
+        self.cif_analyzer = CIFAnalyzer(self.dict_manager)
         self.cif_parser = CIFParser()
-        config_path = os.path.dirname(__file__)
         
-        # Load both field definition sets
-        self.field_checker.load_field_set('3DED', os.path.join(config_path, 'field_definitions.cif_ed'))
-        self.field_checker.load_field_set('HP', os.path.join(config_path, 'field_definitions.cif_hp'))
+        # Current analysis results
+        self.current_analysis = None
         
         # Load settings
         self.load_settings()
@@ -290,6 +290,43 @@ class CIFEditor(QMainWindow):
         self.ruler.setVisible(self.settings['show_ruler'])
         self.save_settings()
 
+    def update_analysis_display(self):
+        """Update the analysis results display"""
+        if not self.current_analysis:
+            return
+        
+        analysis = self.current_analysis
+        
+        # Create analysis summary text
+        summary_parts = []
+        summary_parts.append(f"📁 File: {os.path.basename(analysis.file_path)}")
+        summary_parts.append(f"📝 CIF Version: {analysis.cif_version.value}")
+        summary_parts.append(f"📊 Fields Found: {analysis.field_count}")
+        
+        # Format detected methods
+        methods_str = ", ".join([m.value.replace('_', ' ').title() for m in analysis.detected_methods])
+        summary_parts.append(f"🔬 Methods: {methods_str}")
+        
+        # Add confidence scores
+        if analysis.confidence_scores:
+            high_confidence = [f"{k}: {v:.0%}" for k, v in analysis.confidence_scores.items() if v > 0.8]
+            if high_confidence:
+                summary_parts.append(f"✅ High Confidence: {', '.join(high_confidence)}")
+        
+        # Add recommendations
+        if analysis.recommendations:
+            summary_parts.append(f"\n💡 Recommendations:")
+            for rec in analysis.recommendations[:3]:  # Show first 3
+                summary_parts.append(f"  • {rec}")
+        
+        analysis_text = "\n".join(summary_parts)
+        
+        # Update status bar with analysis summary
+        self.status_bar.showMessage(f"Analysis: {analysis.cif_version.value} | {len(analysis.detected_methods)} methods | {analysis.field_count} fields", 5000)
+        
+        # For now, show analysis in a message box (we can make this a permanent panel later)
+        QMessageBox.information(self, "CIF Analysis Results", analysis_text)
+
     def init_ui(self):
         self.setWindowTitle("EDCIF-check")
         self.setGeometry(100, 100, 900, 700)
@@ -339,18 +376,30 @@ class CIFEditor(QMainWindow):
         button_layout = QHBoxLayout()
         
         # Create buttons
-        check_3ded_button = QPushButton("Start Checks (3DED)")
+        analyze_button = QPushButton("🔍 Analyze CIF")
+        analyze_button.clicked.connect(self.analyze_cif)
+        analyze_button.setToolTip("Comprehensive CIF analysis - detects format version and crystallography methods")
+        
+        check_3ded_button = QPushButton("🔬 3D ED Check")
         check_3ded_button.clicked.connect(self.start_checks_3ded)
-        check_hp_button = QPushButton("Start Checks (HP)")
+        check_3ded_button.setToolTip("Check for electron diffraction compatibility")
+        
+        check_hp_button = QPushButton("⚡ HP Check")
         check_hp_button.clicked.connect(self.start_checks_hp)
-        refine_details_button = QPushButton("Edit Refinement Details")
+        check_hp_button.setToolTip("Check for high pressure crystallography compatibility")
+        
+        refine_details_button = QPushButton("📝 Edit Details")
         refine_details_button.clicked.connect(self.check_refine_special_details)
-        format_button = QPushButton("Reformat File")
+        
+        format_button = QPushButton("📐 Reformat")
         format_button.clicked.connect(self.reformat_file)
-        save_button = QPushButton("Save")
+        format_button.setToolTip("Reformat file to 80-character line length")
+        
+        save_button = QPushButton("💾 Save")
         save_button.clicked.connect(self.save_file)
         
         # Add buttons to layout
+        button_layout.addWidget(analyze_button)
         button_layout.addWidget(check_3ded_button)
         button_layout.addWidget(check_hp_button)
         button_layout.addWidget(refine_details_button)
@@ -529,11 +578,37 @@ class CIFEditor(QMainWindow):
         if filepath:
             self.save_to_file(filepath)
 
+    def analyze_cif(self):
+        """Modern CIF analysis using the new CIFAnalyzer"""
+        if not self.current_file:
+            QMessageBox.warning(self, "Warning", "Please open a CIF file first.")
+            return None
+        
+        try:
+            # Analyze the current file
+            self.current_analysis = self.cif_analyzer.analyze_cif_file(self.current_file)
+            
+            # Update the analysis display
+            self.update_analysis_display()
+            
+            return self.current_analysis
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Error", f"Error analyzing CIF file:\n{str(e)}")
+            return None
+
     def validate_cif(self):
-        """Basic CIF syntax validation"""
+        """Legacy validation method - now calls modern analysis"""
+        analysis = self.analyze_cif()
+        if not analysis:
+            return []
+        
+        # Convert analysis to legacy error format for compatibility
+        errors = []
+        
+        # Add basic syntax errors
         text = self.text_editor.toPlainText()
         lines = text.splitlines()
-        errors = []
         
         # Check for basic CIF syntax rules
         in_multiline = False
@@ -558,7 +633,7 @@ class CIFEditor(QMainWindow):
         
         if in_multiline:
             errors.append("Unclosed multiline value (missing semicolon)")
-            
+
         return errors
 
     def save_to_file(self, filepath):
@@ -695,124 +770,76 @@ class CIFEditor(QMainWindow):
         return QDialog.DialogCode.Rejected
 
     def start_checks_3ded(self):
-        """Start checking CIF fields using 3DED field definitions."""
-        # Store the initial state for potential restore
-        initial_state = self.text_editor.toPlainText()
-        
-        # Get the 3DED field set
-        fields = self.field_checker.get_field_set('3DED')
-        if not fields:
-            QMessageBox.warning(self, "Warning", 
-                              "No 3DED field definitions loaded.")
+        """Start modern CIF analysis focused on electron diffraction."""
+        if not self.current_file:
+            QMessageBox.warning(self, "Warning", "Please open a CIF file first.")
             return
+        
+        # Perform analysis
+        analysis = self.analyze_cif()
+        if not analysis:
+            return
+        
+        # Check if electron diffraction is detected
+        ed_detected = CrystallographyMethod.ELECTRON_DIFFRACTION in analysis.detected_methods
+        
+        if ed_detected:
+            confidence = analysis.confidence_scores.get('electron_diffraction', 0)
+            QMessageBox.information(
+                self, "Electron Diffraction Analysis",
+                f"✅ Electron diffraction detected with {confidence:.0%} confidence!\n\n"
+                f"CIF Version: {analysis.cif_version.value}\n"
+                f"Fields found: {analysis.field_count}\n\n"
+                f"The file appears to be properly configured for 3D ED."
+            )
+        else:
+            # Show recommendations for making it ED-compatible
+            recommendations = []
+            recommendations.append("To make this file compatible with 3D ED standards:")
+            recommendations.append("• Add _diffrn_radiation.probe = 'electron'")
+            recommendations.append("• Consider adding _diffrn_detector.type")
+            recommendations.append("• Add _exptl_crystal.preparation details")
             
-        try:
-            # Process all required fields
-            for field in fields:
-                # Check each field
-                result = self.check_line(field.name, field.default_value, description=field.description)
-                if result == CIFInputDialog.RESULT_ABORT:
-                    # Restore original state
-                    self.text_editor.setText(initial_state)
-                    QMessageBox.information(self, "Changes Aborted",
-                                       "All changes have been discarded.")
-                    return
-                elif result == CIFInputDialog.RESULT_STOP_SAVE:
-                    QMessageBox.information(self, "Checks Stopped",
-                                       "Changes have been saved. Remaining checks skipped.")
-                    return
-            
-            # Always check refine special details last
-            result = self.check_refine_special_details()
-            if result == MultilineInputDialog.RESULT_ABORT:
-                # Restore original state
-                self.text_editor.setText(initial_state)
-                QMessageBox.information(self, "Changes Aborted",
-                                   "All changes have been discarded.")
-                return
-            elif result == MultilineInputDialog.RESULT_STOP_SAVE:
-                QMessageBox.information(self, "Checks Stopped",
-                                   "Changes have been saved. Remaining checks skipped.")
-                return
-
-            # Check for _chemical_absolute_configuration
-            sohncke_groups = [1, 3, 4, 5, 16, 17, 18, 19, 20, 21, 22, 23, 24, 75, 76, 77, 78, 79, 80, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 143, 144, 145, 146, 149, 150, 151, 152, 153, 154, 155, 168, 169, 170, 171, 172, 173, 177, 178, 179, 180, 181, 182, 195, 196, 197, 198, 199, 207, 208, 209, 210, 211, 212, 213, 214]
-            SG_number = None
-            lines = self.text_editor.toPlainText().splitlines()
-            for line in lines:
-                if line.startswith("_space_group_IT_number"):
-                    parts = line.split()
-                    if len(parts) > 1:
-                        try:
-                            SG_number = int(parts[1].strip("'\""))
-                        except Exception:
-                            pass
-                    break
-            if SG_number is not None and SG_number in sohncke_groups:
-                found = False
-                for line in lines:
-                    if line.startswith("_chemical_absolute_configuration"):
-                        found = True
-                        break
-                if found:
-                    self.check_line("_chemical_absolute_configuration", default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.")
-                else:
-                    self.add_missing_line("_chemical_absolute_configuration", lines, default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.")
-            
-            QMessageBox.information(self, "Checks Complete", 
-                                  "All 3DED CIF checks completed successfully.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error",
-                             f"An error occurred during checks:\n{str(e)}")
+            QMessageBox.warning(
+                self, "Electron Diffraction Check",
+                "\n".join(recommendations)
+            )
 
     def start_checks_hp(self):
-        """Start checking CIF fields using HP (high pressure) field definitions."""
-        # Store the initial state for potential restore
-        initial_state = self.text_editor.toPlainText()
-        
-        # Get the HP field set
-        fields = self.field_checker.get_field_set('HP')
-        if not fields:
-            QMessageBox.warning(self, "Warning", 
-                              "No HP field definitions loaded.")
+        """Start modern CIF analysis focused on high pressure crystallography."""
+        if not self.current_file:
+            QMessageBox.warning(self, "Warning", "Please open a CIF file first.")
             return
+        
+        # Perform analysis
+        analysis = self.analyze_cif()
+        if not analysis:
+            return
+        
+        # Check if high pressure is detected
+        hp_detected = CrystallographyMethod.HIGH_PRESSURE in analysis.detected_methods
+        
+        if hp_detected:
+            confidence = analysis.confidence_scores.get('high_pressure', 0)
+            QMessageBox.information(
+                self, "High Pressure Analysis",
+                f"✅ High pressure crystallography detected with {confidence:.0%} confidence!\n\n"
+                f"CIF Version: {analysis.cif_version.value}\n"
+                f"Fields found: {analysis.field_count}\n\n"
+                f"The file appears to be properly configured for HP crystallography."
+            )
+        else:
+            # Show recommendations for making it HP-compatible
+            recommendations = []
+            recommendations.append("To make this file compatible with HP crystallography:")
+            recommendations.append("• Add _diffrn.ambient_pressure or _diffrn_ambient_pressure")
+            recommendations.append("• Consider adding _exptl_crystal.pressure_history")
+            recommendations.append("• Add pressure-related keywords in descriptions")
             
-        try:
-            # Process all required fields
-            for field in fields:
-                # Check each field
-                result = self.check_line(field.name, field.default_value, description=field.description)
-                if result == CIFInputDialog.RESULT_ABORT:
-                    # Restore original state
-                    self.text_editor.setText(initial_state)
-                    QMessageBox.information(self, "Changes Aborted",
-                                       "All changes have been discarded.")
-                    return
-                elif result == CIFInputDialog.RESULT_STOP_SAVE:
-                    QMessageBox.information(self, "Checks Stopped",
-                                       "Changes have been saved. Remaining checks skipped.")
-                    return
-
-            # Always check refine special details last
-            result = self.check_refine_special_details()
-            if result == MultilineInputDialog.RESULT_ABORT:
-                # Restore original state
-                self.text_editor.setText(initial_state)
-                QMessageBox.information(self, "Changes Aborted",
-                                   "All changes have been discarded.")
-                return
-            elif result == MultilineInputDialog.RESULT_STOP_SAVE:
-                QMessageBox.information(self, "Checks Stopped",
-                                   "Changes have been saved. Remaining checks skipped.")
-                return
-            
-            QMessageBox.information(self, "Checks Complete", 
-                                  "All HP CIF checks completed successfully.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error",
-                             f"An error occurred during checks:\n{str(e)}")    
+            QMessageBox.warning(
+                self, "High Pressure Check",
+                "\n".join(recommendations)
+            )    
     def reformat_file(self):
         """Reformat CIF file to handle long lines and properly format values, preserving semicolon blocks."""
         try:
