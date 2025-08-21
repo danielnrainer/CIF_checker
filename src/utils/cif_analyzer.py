@@ -99,13 +99,17 @@ class CIFAnalyzer:
             },
             
             CrystallographyMethod.POWDER_DIFFRACTION: {
-                'indicator_fields': [
-                    '_pd_', '_powder_', '_diffrn_measurement_method',
-                ],
+                'required_fields': ['_diffrn_measurement.method'],
                 'required_values': {
-                    '_diffrn_measurement_method': ['powder']
+                    '_diffrn_measurement.method': ['powder']
                 },
-                'keywords': ['powder', 'bragg-brentano']
+                'indicator_fields': [
+                    '_pd_',  # Prefix pattern - will match any field starting with _pd_
+                    '_powder_',  # Prefix pattern - will match any field starting with _powder_
+                    '_pd_meas_number_of_points',
+                    '_pd_proc_ls_prof_R_factor'
+                ],
+                'keywords': ['powder', 'bragg-brentano', 'rietveld']
             },
             
             CrystallographyMethod.NEUTRON_DIFFRACTION: {
@@ -297,8 +301,15 @@ class CIFAnalyzer:
             if 'indicator_fields' in indicators:
                 found_indicators = []
                 for field_pattern in indicators['indicator_fields']:
-                    matching_fields = [f for f in fields if field_pattern in f or 
-                                     self._normalize_field(field_pattern) in self._normalize_field(f)]
+                    # More precise matching - either exact match or prefix match for patterns ending with _
+                    if field_pattern.endswith('_'):
+                        # Prefix pattern like '_pd_' - match fields starting with this pattern
+                        matching_fields = [f for f in fields if f.startswith(field_pattern)]
+                    else:
+                        # Exact field name - match exactly or normalized versions
+                        matching_fields = [f for f in fields if f == field_pattern or 
+                                         self._normalize_field(f) == self._normalize_field(field_pattern)]
+                    
                     if matching_fields:
                         found_indicators.extend(matching_fields)
                         score += 1.0

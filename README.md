@@ -65,9 +65,21 @@ CIF_checker/
 ## 🎯 Usage
 
 1. **Open CIF file** - Use the file browser or drag & drop
-2. **Automatic analysis** - Method detection and field validation happen instantly
-3. **Review results** - Check missing fields, validation errors, and suggestions
-4. **Syntax highlighting** - Navigate through your CIF with intelligent field highlighting
+2. **Click "🔬 3D ED Check"** - Get comprehensive 3D electron diffraction validation
+3. **Review results** - Detailed compliance report with validation status
+4. **Address issues** - Clear recommendations for improvement
+
+The 3D ED validator automatically:
+- ✅ **Detects 3D ED experiments** with high accuracy
+- ✅ **Validates essential fields** according to CIF Core Dictionary 3.3.0 (2025)
+- ✅ **Checks field consistency** (voltage-wavelength, crystal sizes, etc.)
+- ✅ **Provides validation status** - ready vs. needs attention
+- ✅ **Gives actionable recommendations** for improvement
+
+### Standard Analysis
+1. **Click "🔍 Analyze CIF"** - General analysis for any crystallographic method
+2. **Automatic method detection** - Identifies X-ray, neutron, electron diffraction, etc.
+3. **Syntax highlighting** - Navigate through your CIF with intelligent field highlighting
 
 ## 🔧 Advanced Features
 

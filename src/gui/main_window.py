@@ -10,6 +10,7 @@ import json
 from utils.cif_analyzer import CIFAnalyzer, CIFVersion, CrystallographyMethod
 from utils.cif_dictionary_manager import CIFDictionaryManager
 from utils.CIF_parser import CIFParser
+from utils.ed_validator import ED3DValidator
 
 
 # Dialog result codes for consistency
@@ -198,6 +199,9 @@ class CIFEditor(QMainWindow):
         self.cif_analyzer = CIFAnalyzer(self.dict_manager)
         self.cif_parser = CIFParser()
         
+        # Initialize specialized 3D ED validator for conference demo
+        self.ed3d_validator = ED3DValidator()
+        
         # Current analysis results
         self.current_analysis = None
         
@@ -382,7 +386,7 @@ class CIFEditor(QMainWindow):
         
         check_3ded_button = QPushButton("🔬 3D ED Check")
         check_3ded_button.clicked.connect(self.start_checks_3ded)
-        check_3ded_button.setToolTip("Check for electron diffraction compatibility")
+        check_3ded_button.setToolTip("Specialized 3D electron diffraction validation - comprehensive compliance check")
         
         check_hp_button = QPushButton("⚡ HP Check")
         check_hp_button.clicked.connect(self.start_checks_hp)
@@ -770,40 +774,173 @@ class CIFEditor(QMainWindow):
         return QDialog.DialogCode.Rejected
 
     def start_checks_3ded(self):
-        """Start modern CIF analysis focused on electron diffraction."""
+        """Conference-ready 3D ED validation using specialized validator."""
         if not self.current_file:
             QMessageBox.warning(self, "Warning", "Please open a CIF file first.")
             return
         
-        # Perform analysis
-        analysis = self.analyze_cif()
-        if not analysis:
+        try:
+            # Get current CIF content
+            cif_content = self.text_editor.toPlainText()
+            
+            # Run specialized 3D ED validation
+            validation_report = self.ed3d_validator.validate_cif_content(cif_content)
+            
+            # Display conference-ready results
+            self.display_3d_ed_validation_results(validation_report)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Validation Error", 
+                               f"Error during 3D ED validation:\n{str(e)}")
+    
+    def display_3d_ed_validation_results(self, report):
+        """Display 3D ED validation results in a conference-ready format"""
+        if report["validation_status"] == "not_applicable":
+            QMessageBox.information(
+                self, "3D ED Validation",
+                "❌ Not a 3D ED experiment\n\n"
+                + report["message"]
+            )
             return
         
-        # Check if electron diffraction is detected
-        ed_detected = CrystallographyMethod.ELECTRON_DIFFRACTION in analysis.detected_methods
+        # Create detailed message
+        title = "🔬 3D Electron Diffraction Validation Report"
         
-        if ed_detected:
-            confidence = analysis.confidence_scores.get('electron_diffraction', 0)
-            QMessageBox.information(
-                self, "Electron Diffraction Analysis",
-                f"✅ Electron diffraction detected with {confidence:.0%} confidence!\n\n"
-                f"CIF Version: {analysis.cif_version.value}\n"
-                f"Fields found: {analysis.field_count}\n\n"
-                f"The file appears to be properly configured for 3D ED."
-            )
+        # Overall status with conference context
+        status_icon = {
+            "excellent": "✅",
+            "warnings": "⚠️", 
+            "issues_found": "❌"
+        }.get(report["validation_status"], "❓")
+        
+        message_parts = []
+        message_parts.append(f"{status_icon} **{report['method_detected']}** detected")
+        message_parts.append("")
+        message_parts.append("📊 **Validation Summary:**")
+        
+        summary = report["summary"]
+        message_parts.append(f"• Total checks: {summary['total_checks']}")
+        message_parts.append(f"• ✅ Passed: {summary['passed']}")
+        
+        if summary['failed'] > 0:
+            message_parts.append(f"• ❌ Failed: {summary['failed']}")
+        if summary['warnings'] > 0:
+            message_parts.append(f"• ⚠️ Warnings: {summary['warnings']}")
+        if summary['missing'] > 0:
+            message_parts.append(f"• 📝 Missing: {summary['missing']}")
+        
+        message_parts.append("")
+        message_parts.append("🎯 **Conference Status:**")
+        message_parts.append(report["conference_summary"])
+        
+        # Add critical issues if any
+        critical_issues = [r for r in report["detailed_results"] 
+                          if r["status"] in ["fail", "missing"] and r["level"] == "essential"]
+        
+        if critical_issues:
+            message_parts.append("")
+            message_parts.append("🚨 **Critical Issues to Fix:**")
+            for issue in critical_issues[:5]:  # Show first 5
+                message_parts.append(f"• {issue['field']}: {issue['message']}")
+        
+        # Add recommendations
+        if report["recommendations"]:
+            message_parts.append("")
+            message_parts.append("💡 **Recommendations:**")
+            for rec in report["recommendations"][:3]:  # Show first 3
+                message_parts.append(f"• {rec}")
+        
+        # Show detailed dialog for conference presentation
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle(title)
+        msg_box.setText("\n".join(message_parts))
+        
+        # Style the dialog for better presentation
+        if report["validation_status"] == "excellent":
+            msg_box.setIcon(QMessageBox.Icon.Information)
+        elif report["validation_status"] == "warnings":
+            msg_box.setIcon(QMessageBox.Icon.Warning)
         else:
-            # Show recommendations for making it ED-compatible
-            recommendations = []
-            recommendations.append("To make this file compatible with 3D ED standards:")
-            recommendations.append("• Add _diffrn_radiation.probe = 'electron'")
-            recommendations.append("• Consider adding _diffrn_detector.type")
-            recommendations.append("• Add _exptl_crystal.preparation details")
+            msg_box.setIcon(QMessageBox.Icon.Critical)
+        
+        # Add detailed results button
+        if len(report["detailed_results"]) > 5:
+            details_button = msg_box.addButton("Show All Details", QMessageBox.ButtonRole.ActionRole)
+            msg_box.addButton(QMessageBox.StandardButton.Ok)
             
-            QMessageBox.warning(
-                self, "Electron Diffraction Check",
-                "\n".join(recommendations)
-            )
+            result = msg_box.exec()
+            
+            # Show detailed results if requested
+            if msg_box.clickedButton() == details_button:
+                self.show_detailed_3d_ed_results(report)
+        else:
+            msg_box.exec()
+    
+    def show_detailed_3d_ed_results(self, report):
+        """Show detailed validation results in a separate dialog"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Detailed 3D ED Validation Results")
+        dialog.setMinimumSize(800, 600)
+        
+        layout = QVBoxLayout()
+        
+        # Create scroll area for detailed results
+        scroll_area = QScrollArea()
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout()
+        
+        # Group results by status
+        result_groups = {
+            "✅ Passed": [r for r in report["detailed_results"] if r["status"] == "pass"],
+            "❌ Failed": [r for r in report["detailed_results"] if r["status"] == "fail"], 
+            "📝 Missing": [r for r in report["detailed_results"] if r["status"] == "missing"],
+            "⚠️ Warnings": [r for r in report["detailed_results"] if r["status"] == "warning"]
+        }
+        
+        for group_name, results in result_groups.items():
+            if not results:
+                continue
+                
+            # Group header
+            header = QLabel(f"{group_name} ({len(results)})")
+            header.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 10px;")
+            scroll_layout.addWidget(header)
+            
+            # Results in this group
+            for result in results:
+                result_frame = QFrame()
+                result_frame.setFrameStyle(QFrame.Shape.Box)
+                result_frame.setStyleSheet("padding: 5px; margin: 2px; background-color: #f5f5f5;")
+                
+                result_layout = QVBoxLayout()
+                
+                field_label = QLabel(f"Field: {result['field']}")
+                field_label.setStyleSheet("font-weight: bold;")
+                result_layout.addWidget(field_label)
+                
+                message_label = QLabel(f"Message: {result['message']}")
+                result_layout.addWidget(message_label)
+                
+                level_label = QLabel(f"Level: {result['level'].replace('_', ' ').title()}")
+                level_label.setStyleSheet("font-style: italic; color: #666;")
+                result_layout.addWidget(level_label)
+                
+                result_frame.setLayout(result_layout)
+                scroll_layout.addWidget(result_frame)
+        
+        scroll_widget.setLayout(scroll_layout)
+        scroll_area.setWidget(scroll_widget)
+        scroll_area.setWidgetResizable(True)
+        
+        layout.addWidget(scroll_area)
+        
+        # Close button
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        
+        dialog.setLayout(layout)
+        dialog.exec()
 
     def start_checks_hp(self):
         """Start modern CIF analysis focused on high pressure crystallography."""

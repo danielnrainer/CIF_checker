@@ -1,0 +1,145 @@
+{
+  "name": "3D Electron Diffraction (3D ED)",
+  "description": "Validation profile for 3D electron diffraction structure determination",
+  "version": "2025.1",
+  "cif_core_version": "3.3.0",
+  
+  "method_detection": {
+    "required_fields": ["_diffrn_radiation.probe"],
+    "required_values": {
+      "_diffrn_radiation.probe": ["electron"]
+    },
+    "indicator_fields": [
+      "_diffrn_source.voltage",
+      "_diffrn_detector.type", 
+      "_exptl_crystal.preparation",
+      "_diffrn_measurement.device_type"
+    ],
+    "keywords": ["electron", "tem", "precession", "microed", "3d ed", "cred", "pedt"]
+  },
+  
+  "required_fields": {
+    "essential": [
+      "_diffrn_radiation.probe",
+      "_diffrn_radiation.wavelength",
+      "_diffrn_source.voltage", 
+      "_diffrn_detector.type",
+      "_exptl_crystal.size_max",
+      "_exptl_crystal.size_mid", 
+      "_exptl_crystal.size_min",
+      "_cell_measurement_temperature",
+      "_diffrn_ambient_temperature",
+      "_diffrn_ambient_environment"
+    ],
+    
+    "highly_recommended": [
+      "_diffrn_source.type",
+      "_diffrn_source_details",
+      "_diffrn_detector",
+      "_exptl_crystal.colour",
+      "_exptl_crystal.description",
+      "_exptl_crystal.preparation",
+      "_diffrn_measurement.device_type",
+      "_diffrn_measurement.method",
+      "_diffrn_radiation.monochromator"
+    ],
+    
+    "method_specific": [
+      "_diffrn_detector.area_resol_mean",
+      "_diffrn_detector.pixel_size", 
+      "_diffrn_source.current",
+      "_diffrn_measurement.specimen_support",
+      "_exptl_crystal.mounting_method"
+    ]
+  },
+  
+  "field_validation": {
+    "_diffrn_radiation.probe": {
+      "required_value": "electron",
+      "case_sensitive": false
+    },
+    
+    "_diffrn_source.voltage": {
+      "type": "numeric",
+      "units": "kV",
+      "typical_range": [80, 300],
+      "common_values": [80, 120, 200, 300]
+    },
+    
+    "_diffrn_radiation.wavelength": {
+      "type": "numeric", 
+      "units": "Å",
+      "calculation": "λ = h/p where p = √[(E_kinetic + mc²)² - (mc²)²]/c - relativistic de Broglie wavelength",
+      "typical_range": [0.0197, 0.0411],
+      "note": "Calculated using correct relativistic momentum formula for accurate voltage-wavelength consistency"
+    },
+    
+    "_diffrn_ambient_environment": {
+      "allowed_values": ["vacuum", "helium", "nitrogen", "air", "cryogenic"],
+      "default": "vacuum"
+    },
+    
+    "_exptl_crystal.size_max": {
+      "type": "numeric",
+      "units": "μm", 
+      "typical_range": [0.1, 20.0],
+      "note": "Crystal dimensions should be consistent with electron transparency"
+    },
+    
+    "_exptl_crystal.size_mid": {
+      "type": "numeric",
+      "units": "μm",
+      "constraint": "≤ _exptl_crystal.size_max"
+    },
+    
+    "_exptl_crystal.size_min": {
+      "type": "numeric", 
+      "units": "μm",
+      "constraint": "≤ _exptl_crystal.size_mid"
+    }
+  },
+  
+  "common_detectors": [
+    "Rigaku HyPix-ED",
+    "Rigaku HyPix-Arc", 
+    "ASI Timpix",
+    "TVIPS XF-416",
+    "Gatan K2",
+    "Gatan K3",
+    "hybrid pixel array detector",
+    "CMOS detector",
+    "CCD detector"
+  ],
+  
+  "common_sources": [
+    "electron gun",
+    "LaB6",
+    "tungsten", 
+    "FEG",
+    "Schottky FEG",
+    "cold FEG"
+  ],
+  
+  "validation_rules": [
+    {
+      "rule": "voltage_wavelength_consistency",
+      "description": "Wavelength should be consistent with accelerating voltage",
+      "check": "Calculate expected wavelength from voltage and compare"
+    },
+    {
+      "rule": "crystal_size_ordering", 
+      "description": "Crystal dimensions should be ordered: max ≥ mid ≥ min",
+      "check": "Verify size_max ≥ size_mid ≥ size_min"
+    },
+    {
+      "rule": "temperature_consistency",
+      "description": "Cell measurement and diffraction temperatures should be consistent",
+      "check": "Verify temperatures are within reasonable range"
+    },
+    {
+      "rule": "detector_compatibility",
+      "description": "Detector type should be appropriate for electron diffraction",
+      "check": "Verify detector is suitable for ED experiments"
+    }
+  ]
+}
