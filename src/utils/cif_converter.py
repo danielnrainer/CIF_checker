@@ -37,55 +37,33 @@ class CIFConverter:
         self.cif2_only_fields = self._identify_cif2_only_fields()
 
     def _build_cif1_to_cif2_mappings(self) -> Dict[str, str]:
-        """Build CIF1 to CIF2 field mappings from the dictionary"""
+        """Build CIF1 to CIF2 field mappings from the dictionary using alias information"""
         mappings = {}
         
-        # Since the dictionary contains CIF2 fields (with dots), we need to 
-        # generate CIF1 equivalents by converting dots to underscores
-        for cif2_field in self.all_fields:
-            if '.' in cif2_field:
-                # Convert CIF2 dot notation to CIF1 underscore notation
-                # CIF1 field names always start with underscore
-                cif1_field = '_' + cif2_field.replace('.', '_')
-                # CIF2 fields also need the leading underscore!
-                cif2_field_with_underscore = '_' + cif2_field
-                mappings[cif1_field] = cif2_field_with_underscore
+        # Get alias mappings from the dictionary manager
+        # This provides alias_name -> definition_id mappings from the CIF dictionary
+        alias_mappings = self.dict_manager.get_alias_mappings()
         
-        # Add some manual mappings for special cases that don't follow the pattern
+        # Convert alias mappings to proper CIF1 -> CIF2 mappings
+        # The aliases are the CIF1 forms, definition_ids are the CIF2 forms
+        for alias, definition_id in alias_mappings.items():
+            # Both alias and definition_id should start with '_'
+            if alias.startswith('_') and definition_id.startswith('_'):
+                mappings[alias] = definition_id
+        
+        # Add some manual mappings for special cases that aren't handled by aliases
+        # or need specific handling that differs from the dictionary structure
         manual_mappings = {
             # Space group special cases (avoid conflicts with auto-generated mappings)
             '_symmetry_space_group_name_H-M': '_space_group.name_H-M_full',
             '_symmetry_cell_setting': '_space_group.crystal_system',
-            
-            # Radiation/wavelength mappings (CIF2 uses more specific field structures)
-            '_diffrn_radiation_wavelength': '_diffrn_radiation_wavelength.value',
-            '_diffrn_radiation_type': '_diffrn_radiation.type',
-            '_diffrn_radiation_probe': '_diffrn_radiation.probe',
-            
-            # Detector mappings (CIF2 uses more specific categories)
-            '_diffrn_detector': '_diffrn_detector.description',
-            '_diffrn_detector_type': '_diffrn_detector.make',
-            
-            # Measurement device mappings
-            '_diffrn_measurement_device': '_diffrn_measurement.device_class',
-            '_diffrn_measurement_device_type': '_diffrn_measurement.device_make',
             
             # Legacy symmetry fields (these are deprecated in CIF2 but still commonly used)
             '_symmetry_equiv_pos_as_xyz': '_space_group_symop.operation_xyz',
             '_symmetry_equiv_pos_site_id': '_space_group_symop.id',
             
             # Additional common fields with non-obvious mappings
-            '_diffrn_radiation_source': '_diffrn_source.description',
-            '_diffrn_radiation_monochromator': '_diffrn_radiation.monochromator',
-            
-            # Fix for commonly used legacy fields
             '_symmetry_Int_Tables_number': '_space_group.IT_number',
-            '_atom_site_thermal_displace_type': '_atom_site.thermal_displace_type',
-            
-            # Refinement mappings
-            '_refine_ls_R_factor_all': '_refine.ls_R_factor_all',
-            '_refine_ls_R_factor_gt': '_refine.ls_R_factor_gt', 
-            '_refine_ls_wR_factor_ref': '_refine.ls_wR_factor_ref',
         }
         
         # Only add manual mappings if the CIF2 field exists in dictionary

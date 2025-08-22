@@ -42,6 +42,7 @@ class CIFDictionaryManager:
         self._loaded_categories: Set[str] = set()
         self._dict_content: Optional[str] = None
         self._field_positions: Dict[str, tuple] = {}  # (start_line, end_line)
+        self._alias_to_definition: Dict[str, str] = {}  # Maps aliases to definition IDs
         
         # Initialize field position index for fast lookup
         self._build_field_index()
@@ -69,6 +70,7 @@ class CIFDictionaryManager:
         current_field = None
         start_line = 0
         in_field_definition = False
+        current_definition_id = None
         
         for i, line in enumerate(lines):
             line_stripped = line.strip()
@@ -81,6 +83,7 @@ class CIFDictionaryManager:
                 
                 in_field_definition = False
                 current_field = None
+                current_definition_id = None
                 start_line = i
             
             # Look for _definition.id lines within save_ blocks
@@ -92,7 +95,31 @@ class CIFDictionaryManager:
                     if field_name.startswith('_'):
                         # Remove the leading underscore for our internal indexing
                         current_field = field_name[1:]
+                        current_definition_id = field_name
                         in_field_definition = True
+            
+            # Look for _alias.definition_id lines within save_ blocks
+            elif line_stripped.startswith('_alias.definition_id') and current_definition_id:
+                # Extract alias field name
+                parts = line_stripped.split()
+                if len(parts) >= 2:
+                    alias_name = parts[1].strip("'\"")
+                    if alias_name.startswith('_'):
+                        # Map alias to the current definition ID
+                        self._alias_to_definition[alias_name] = current_definition_id
+            
+            # Handle aliases in loop blocks (multiple aliases can be listed in a loop)
+            elif in_field_definition and current_definition_id:
+                # Check if this line contains an alias field name
+                # Format could be: '_alias_name'  or  '_alias_name'  2003-10-04  etc.
+                if line_stripped.startswith("'_") and line_stripped.count("'") >= 2:
+                    # Extract just the field name part (before any additional info)
+                    first_quote = line_stripped.find("'")
+                    second_quote = line_stripped.find("'", first_quote + 1)
+                    if second_quote > first_quote:
+                        alias_name = line_stripped[first_quote+1:second_quote]
+                        if alias_name.startswith('_'):
+                            self._alias_to_definition[alias_name] = current_definition_id
             
             # Handle end of save_ block
             elif line_stripped == 'save_' and current_field and in_field_definition:
@@ -104,11 +131,32 @@ class CIFDictionaryManager:
         if current_field and in_field_definition:
             self._field_positions[current_field] = (start_line, len(lines)-1)
         
-        print(f"Indexed {len(self._field_positions)} CIF fields")
+        print(f"Indexed {len(self._field_positions)} CIF fields and {len(self._alias_to_definition)} aliases")
 
     def get_all_field_names(self) -> Set[str]:
         """Get all available field names from the dictionary"""
         return set(self._field_positions.keys())
+    
+    def get_alias_mappings(self) -> Dict[str, str]:
+        """
+        Get all alias to definition ID mappings.
+        
+        Returns:
+            Dictionary mapping alias field names to their definition IDs
+        """
+        return self._alias_to_definition.copy()
+    
+    def resolve_alias(self, field_name: str) -> str:
+        """
+        Resolve a field name that might be an alias to its definition ID.
+        
+        Args:
+            field_name: Field name that might be an alias
+            
+        Returns:
+            The definition ID if the field is an alias, otherwise the original field name
+        """
+        return self._alias_to_definition.get(field_name, field_name)
     
     def get_field_info(self, field_name: str) -> Optional[CIFFieldInfo]:
         """

@@ -66,7 +66,7 @@ class CIFAnalyzer:
         
         # CIF version detection patterns
         self.cif2_indicators = [
-            r'#\\#CIF_2\.0',           # CIF2 header
+            r'##CIF_2\.0',             # CIF2 header
             r'_[a-zA-Z]+\.[a-zA-Z]+',  # Dot notation fields
             r'save_frame',             # Save frames
             r'loop_\s*_[a-zA-Z]+\.[a-zA-Z]+',  # Loop with dot notation
@@ -241,15 +241,19 @@ class CIFAnalyzer:
         cif2_score = 0
         cif1_score = 0
         
-        # Check for explicit version headers
+        # Check for explicit version headers (highest priority)
         if re.search(r'#\\#CIF_2\.0', content):
             evidence.append("CIF2 header found")
-            cif2_score += 10
+            cif2_score += 20  # Much higher weight for explicit header
         elif re.search(r'#\\#CIF_1\.', content):
             evidence.append("CIF1 header found")
-            cif1_score += 10
+            cif1_score += 20
+        elif re.search(r'##CIF_2\.0', content):
+            # This is an incorrect format, but still indicates intention for CIF2
+            evidence.append("Malformed CIF2 header found (should be #\\#CIF_2.0)")
+            cif2_score += 5
         
-        # Check field notation patterns
+        # Check field notation patterns (lower weight)
         dot_notation_count = len([f for f in fields if '.' in f.lstrip('_')])
         underscore_notation_count = len([f for f in fields if '.' not in f.lstrip('_') and '_' in f.lstrip('_')])
         
@@ -282,77 +286,130 @@ class CIFAnalyzer:
         Returns:
             Tuple of (detected_methods, evidence_dict, confidence_scores)
         """
-        detected_methods = []  # Start with empty list (no core by default)
+        detected_methods = []
         method_evidence = {}
         confidence_scores = {}
         
         content_lower = content.lower()
         
+        # First, check for explicit radiation probe types to determine the primary method
+        radiation_probe = self._extract_radiation_probe(content, fields)
+        
         for method, indicators in self.method_indicators.items():
             evidence = []
             score = 0.0
             
-            # Check required fields
-            if 'required_fields' in indicators:
-                for field in indicators['required_fields']:
-                    if any(self._normalize_field(field) == self._normalize_field(f) for f in fields):
-                        evidence.append(f"Required field found: {field}")
-                        score += 2.0
-            
-            # Check required field values
-            if 'required_values' in indicators:
-                for field, values in indicators['required_values'].items():
-                    if any(self._normalize_field(field) == self._normalize_field(f) for f in fields):
-                        # Look for the specific values in content
-                        for value in values:
-                            if value.lower() in content_lower:
-                                evidence.append(f"Required value found: {field} = {value}")
-                                score += 3.0
-            
-            # Check indicator fields
-            if 'indicator_fields' in indicators:
-                found_indicators = []
-                for field_pattern in indicators['indicator_fields']:
-                    # More precise matching - either exact match or prefix match for patterns ending with _
-                    if field_pattern.endswith('_'):
-                        # Prefix pattern like '_pd_' - match fields starting with this pattern
-                        matching_fields = [f for f in fields if f.startswith(field_pattern)]
-                    else:
-                        # Exact field name - match exactly or normalized versions
-                        matching_fields = [f for f in fields if f == field_pattern or 
-                                         self._normalize_field(f) == self._normalize_field(field_pattern)]
+            # Special handling for radiation-based methods (electron, neutron)
+            if method in [CrystallographyMethod.ELECTRON_DIFFRACTION, CrystallographyMethod.NEUTRON_DIFFRACTION]:
+                if 'required_values' in indicators:
+                    # Check if radiation probe matches this method
+                    probe_match = False
+                    for field, values in indicators['required_values'].items():
+                        if 'probe' in field.lower():
+                            for value in values:
+                                if radiation_probe and value.lower() == radiation_probe.lower():
+                                    evidence.append(f"Radiation probe confirmed: {value}")
+                                    score += 10.0  # High score for confirmed probe type
+                                    probe_match = True
+                                    break
                     
-                    if matching_fields:
-                        found_indicators.extend(matching_fields)
-                        score += 1.0
+                    # If probe doesn't match, skip this method (avoid false positives)
+                    if not probe_match and radiation_probe:
+                        continue
+                    
+                    # If no probe detected but keywords suggest this method, be more cautious
+                    if not radiation_probe:
+                        # Check for specific keywords in content
+                        if 'keywords' in indicators:
+                            found_keywords = []
+                            for keyword in indicators['keywords']:
+                                if keyword.lower() in content_lower:
+                                    found_keywords.append(keyword)
+                                    score += 0.5
+                            
+                            if found_keywords:
+                                evidence.append(f"Keywords found: {found_keywords}")
+                        
+                        # Require more evidence if no explicit probe is found
+                        if score < 2.0:
+                            continue
+            else:
+                # Standard detection for non-radiation methods
+                # Check required fields
+                if 'required_fields' in indicators:
+                    for field in indicators['required_fields']:
+                        if any(self._normalize_field(field) == self._normalize_field(f) for f in fields):
+                            evidence.append(f"Required field found: {field}")
+                            score += 2.0
                 
-                if found_indicators:
-                    evidence.append(f"Indicator fields: {found_indicators[:3]}")
-            
-            # Check keywords in content
-            if 'keywords' in indicators:
-                found_keywords = []
-                for keyword in indicators['keywords']:
-                    if keyword.lower() in content_lower:
-                        found_keywords.append(keyword)
-                        score += 0.5
+                # Check required field values
+                if 'required_values' in indicators:
+                    for field, values in indicators['required_values'].items():
+                        if any(self._normalize_field(field) == self._normalize_field(f) for f in fields):
+                            # Look for the specific values in content
+                            for value in values:
+                                if value.lower() in content_lower:
+                                    evidence.append(f"Required value found: {field} = {value}")
+                                    score += 3.0
                 
-                if found_keywords:
-                    evidence.append(f"Keywords found: {found_keywords}")
+                # Check indicator fields
+                if 'indicator_fields' in indicators:
+                    found_indicators = []
+                    for field_pattern in indicators['indicator_fields']:
+                        # More precise matching - either exact match or prefix match for patterns ending with _
+                        if field_pattern.endswith('_'):
+                            # Prefix pattern like '_pd_' - match fields starting with this pattern
+                            matching_fields = [f for f in fields if f.startswith(field_pattern)]
+                        else:
+                            # Exact field name - match exactly or normalized versions
+                            matching_fields = [f for f in fields if f == field_pattern or 
+                                             self._normalize_field(f) == self._normalize_field(field_pattern)]
+                        
+                        if matching_fields:
+                            found_indicators.extend(matching_fields)
+                            score += 1.0
+                    
+                    if found_indicators:
+                        evidence.append(f"Indicator fields: {found_indicators[:3]}")
+                
+                # Check keywords in content
+                if 'keywords' in indicators:
+                    found_keywords = []
+                    for keyword in indicators['keywords']:
+                        if keyword.lower() in content_lower:
+                            found_keywords.append(keyword)
+                            score += 0.5
+                    
+                    if found_keywords:
+                        evidence.append(f"Keywords found: {found_keywords}")
             
             # Determine if method is detected with stricter criteria
-            confidence = min(score / 3.0, 1.0)  # Normalize to 0-1
+            confidence = min(score / 10.0, 1.0)  # Normalize to 0-1
             
             # For methods with required values, require higher confidence
             has_required_values = 'required_values' in indicators and indicators['required_values']
             required_threshold = 3.0 if has_required_values else 1.0
             
-            if score > required_threshold:  # Stricter threshold for value-specific methods
+            if score > required_threshold:
                 detected_methods.append(method)
                 method_evidence[method.value] = evidence
                 confidence_scores[method.value] = confidence
         
         return detected_methods, method_evidence, confidence_scores
+    
+    def _extract_radiation_probe(self, content: str, fields: Set[str]) -> Optional[str]:
+        """Extract the radiation probe type from CIF content"""
+        probe_fields = ['_diffrn_radiation.probe', '_diffrn_radiation_probe']
+        
+        for field in probe_fields:
+            # Check if this field exists in the CIF
+            field_pattern = field.replace('.', r'\.')
+            # Look for the field followed by its value (handle quotes)
+            match = re.search(rf'{field_pattern}\s+([\'"]?)([^\s\'"]+)\1', content, re.IGNORECASE)
+            if match:
+                return match.group(2).lower()
+        
+        return None
     
     def _normalize_field(self, field_name: str) -> str:
         """Normalize field name for comparison"""

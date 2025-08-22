@@ -329,26 +329,201 @@ class CIFParser:
         return field_name in self.fields
     
     def reformat_for_line_length(self, content: str) -> str:
-        """Reformat CIF content to ensure no line exceeds 80 characters.
+        """Reformat CIF content to ensure no line exceeds 80 characters while preserving loop structures.
         
         Args:
             content: The CIF content to reformat
             
         Returns:
-            Reformatted CIF content with proper line length handling
+            Reformatted CIF content with proper line length handling and preserved loops
         """
-        # Parse the content first
-        self.parse_file(content)
+        lines = content.splitlines()
+        reformatted_lines = []
+        i = 0
         
-        # Reformat all fields based on 80-character rule
-        for field_name, field in self.fields.items():
-            if field.value is not None:
-                # Recalculate multiline status based on 80-character rule
-                should_be_multiline = self._should_use_multiline_format(field.name, field.value)
-                field.is_multiline = should_be_multiline
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Skip empty lines and preserve them
+            if not line:
+                reformatted_lines.append("")
+                i += 1
+                continue
+            
+            # Preserve comments
+            if line.startswith('#'):
+                reformatted_lines.append(lines[i])
+                i += 1
+                continue
+            
+            # Handle loop structures - preserve them entirely
+            if line.startswith('loop_'):
+                loop_lines, lines_consumed = self._extract_loop_structure(lines, i)
+                # Validate that loop lines don't exceed 80 characters (but don't modify them)
+                for loop_line in loop_lines:
+                    if len(loop_line.strip()) <= 80:
+                        reformatted_lines.append(loop_line)
+                    else:
+                        # For loop lines that are too long, we preserve them as-is
+                        # since breaking them would destroy the loop structure
+                        reformatted_lines.append(loop_line)
+                i += lines_consumed
+                continue
+            
+            # Handle individual fields (non-loop structures)
+            if line.startswith('_'):
+                field_lines, lines_consumed = self._reformat_individual_field(lines, i)
+                reformatted_lines.extend(field_lines)
+                i += lines_consumed
+                continue
+            
+            # Handle data blocks and other CIF constructs
+            if line.startswith('data_') or line.startswith('global_') or line.startswith('save_'):
+                reformatted_lines.append(lines[i])
+                i += 1
+                continue
+            
+            # For any other lines, preserve as-is
+            reformatted_lines.append(lines[i])
+            i += 1
         
-        # Generate and return the reformatted content
-        return self.generate_cif_content()
+        return '\n'.join(reformatted_lines)
+    
+    def _extract_loop_structure(self, lines: List[str], start_index: int) -> Tuple[List[str], int]:
+        """Extract a complete loop structure starting from loop_ keyword.
+        
+        Returns:
+            Tuple of (loop_lines, lines_consumed)
+        """
+        loop_lines = []
+        i = start_index
+        
+        # Add the loop_ line
+        loop_lines.append(lines[i])
+        i += 1
+        
+        # Collect all field names (lines starting with _)
+        while i < len(lines):
+            line = lines[i].strip()
+            if not line:
+                loop_lines.append(lines[i])
+                i += 1
+                continue
+            if line.startswith('_'):
+                loop_lines.append(lines[i])
+                i += 1
+            else:
+                break
+        
+        # Collect all data rows until we hit another field, loop, or end of data
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Stop if we hit another CIF construct
+            if (line.startswith('_') or line.startswith('loop_') or 
+                line.startswith('data_') or line.startswith('global_') or 
+                line.startswith('save_')):
+                break
+            
+            # Add the data line (including empty lines within the loop)
+            loop_lines.append(lines[i])
+            i += 1
+        
+        return loop_lines, i - start_index
+    
+    def _reformat_individual_field(self, lines: List[str], start_index: int) -> Tuple[List[str], int]:
+        """Reformat an individual CIF field for proper line length.
+        
+        Returns:
+            Tuple of (formatted_lines, lines_consumed)
+        """
+        line = lines[start_index].strip()
+        
+        # Parse the field
+        if ';' in line:
+            # Multiline field starting on same line
+            field_name = line.split()[0]
+            if line.endswith(';') and line.count(';') == 2:
+                # Single line with semicolons: _field ;value;
+                value = line[line.find(';')+1:line.rfind(';')]
+                if len(line) <= 80:
+                    return [lines[start_index]], 1
+                else:
+                    # Convert to proper multiline format
+                    return [field_name, ';', value, ';'], 1
+            else:
+                # True multiline field - preserve structure
+                field_lines = []
+                i = start_index
+                while i < len(lines):
+                    field_lines.append(lines[i])
+                    if lines[i].strip().endswith(';') and i > start_index:
+                        break
+                    i += 1
+                return field_lines, i - start_index + 1
+        
+        # Check if next line is semicolon (multiline field)
+        if (start_index + 1 < len(lines) and 
+            lines[start_index + 1].strip() == ';'):
+            # Multiline field - collect all lines until closing semicolon
+            field_lines = []
+            i = start_index
+            while i < len(lines):
+                field_lines.append(lines[i])
+                if (lines[i].strip() == ';' and i > start_index + 1):
+                    break
+                i += 1
+            return field_lines, i - start_index + 1
+        
+        # Check if value is on the next line (field name alone on first line)
+        if (start_index + 1 < len(lines) and 
+            not lines[start_index + 1].strip().startswith('_') and
+            not lines[start_index + 1].strip().startswith('loop_') and
+            not lines[start_index + 1].strip().startswith('data_') and
+            lines[start_index + 1].strip() and
+            lines[start_index + 1].strip() != ';'):
+            # Value is on next line - check if combined length is too long
+            field_name = line
+            value_line = lines[start_index + 1]
+            combined_length = len(field_name) + len(value_line.strip()) + 4  # 4 spaces for formatting
+            
+            if combined_length <= 80:
+                # Can combine into single line
+                value = value_line.strip()
+                if value.startswith("'") and value.endswith("'"):
+                    formatted_line = f"{field_name}    {value}"
+                elif value.startswith('"') and value.endswith('"'):
+                    formatted_line = f"{field_name}    {value}"
+                else:
+                    formatted_line = f"{field_name}    {value}"
+                return [formatted_line], 2
+            else:
+                # Too long even when combined, convert to multiline
+                value = value_line.strip()
+                if value.startswith("'") and value.endswith("'"):
+                    value = value[1:-1]
+                elif value.startswith('"') and value.endswith('"'):
+                    value = value[1:-1]
+                return [field_name, ';', value, ';'], 2
+        
+        # Single line field
+        original_line = lines[start_index]
+        if len(original_line.strip()) <= 80:
+            return [original_line], 1
+        else:
+            # Line is too long, need to convert to multiline
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                field_name, value = parts
+                # Remove quotes if present
+                if value.startswith("'") and value.endswith("'"):
+                    value = value[1:-1]
+                elif value.startswith('"') and value.endswith('"'):
+                    value = value[1:-1]
+                return [field_name, ';', value, ';'], 1
+            else:
+                # Field with no value or malformed, preserve as-is
+                return [original_line], 1
     
     def _should_use_multiline_format(self, field_name: str, value: str) -> bool:
         """Determine if a field should use multiline format based on length and content."""
