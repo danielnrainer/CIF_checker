@@ -1,9 +1,9 @@
 """
 3D Electron Diffraction (3D ED) Validator
-Conference-ready validation system for 3D ED CIF files
+Specialized validation system for 3D ED CIF files
 
 This module provides specialized validation for 3D electron diffraction experiments,
-ensuring compliance with the latest CIF core dictionary standards for conference presentation.
+ensuring compliance with the latest CIF core dictionary standards.
 """
 
 import json
@@ -12,6 +12,15 @@ import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 from enum import Enum
+
+# Import for CIF version detection
+try:
+    from .cif_analyzer import CIFVersion
+except ImportError:
+    # Fallback for when running as script
+    import sys
+    sys.path.append('..')
+    from cif_analyzer import CIFVersion
 
 class ValidationLevel(Enum):
     ESSENTIAL = "essential"
@@ -26,11 +35,40 @@ class ValidationResult:
         self.level = level
 
 class ED3DValidator:
-    """Conference-ready 3D Electron Diffraction CIF validator"""
+    """3D Electron Diffraction CIF validator with CIF version support"""
     
     def __init__(self):
         self.config = self._load_config()
         self.validation_results = []
+        
+        # Field mappings between CIF1 and CIF2 for ED-specific fields
+        self.cif1_to_cif2_fields = {
+            # Radiation fields
+            '_diffrn_radiation_probe': '_diffrn_radiation.probe',
+            '_diffrn_radiation_wavelength': '_diffrn_radiation.wavelength',
+            '_diffrn_radiation_type': '_diffrn_radiation.type',
+            
+            # Source fields
+            '_diffrn_source_voltage': '_diffrn_source.voltage',
+            '_diffrn_source_current': '_diffrn_source.current',
+            '_diffrn_source_size': '_diffrn_source.size',
+            '_diffrn_source_type': '_diffrn_source.type',
+            
+            # Detector fields
+            '_diffrn_detector_type': '_diffrn_detector.type',
+            '_diffrn_detector_area_resol_mean': '_diffrn_detector.area_resol_mean',
+            
+            # Measurement fields
+            '_diffrn_measurement_device_type': '_diffrn_measurement.device_type',
+            '_diffrn_measurement_device_details': '_diffrn_measurement.device_details',
+            
+            # Ambient conditions
+            '_diffrn_ambient_temperature': '_diffrn.ambient_temperature',
+            '_diffrn_ambient_pressure': '_diffrn.ambient_pressure',
+        }
+        
+        # Reverse mapping
+        self.cif2_to_cif1_fields = {v: k for k, v in self.cif1_to_cif2_fields.items()}
         
     def _load_config(self) -> Dict:
         """Load 3D ED validation configuration"""
@@ -39,7 +77,7 @@ class ED3DValidator:
             with open(config_path, 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
-            # Fallback minimal config for conference demo
+            # Fallback minimal config
             return {
                 "required_fields": {
                     "essential": [
@@ -54,32 +92,42 @@ class ED3DValidator:
                 }
             }
     
-    def validate_cif_content(self, cif_content: str) -> Dict[str, Any]:
+    def validate_cif_content(self, cif_content: str, cif_version: Optional[CIFVersion] = None) -> Dict[str, Any]:
         """
-        Main validation function for conference demo
-        Returns comprehensive validation report for 3D ED
+        Main validation function for 3D ED CIF files with CIF version support
+        
+        Args:
+            cif_content: The CIF file content as string
+            cif_version: Detected CIF version (CIF1, CIF2, or None for auto-detect)
+            
+        Returns:
+            Comprehensive validation report
         """
         self.validation_results = []
+        
+        # Auto-detect CIF version if not provided
+        if cif_version is None:
+            cif_version = self._detect_cif_version(cif_content)
         
         # Extract fields from CIF content
         fields = self._extract_fields(cif_content)
         
-        # Check if this is actually a 3D ED experiment
-        is_3d_ed = self._detect_3d_ed_method(fields)
+        # Check if this is actually a 3D ED experiment (version-aware)
+        is_3d_ed = self._detect_3d_ed_method(fields, cif_version)
         
         if not is_3d_ed:
             return {
                 "method_detected": "Unknown/Not 3D ED",
                 "validation_status": "not_applicable",
-                "message": "This does not appear to be a 3D electron diffraction experiment"
+                "message": f"This does not appear to be a 3D electron diffraction experiment (checked for {cif_version.value if cif_version else 'unknown'} format)"
             }
         
-        # Perform comprehensive validation
-        self._validate_essential_fields(fields)
-        self._validate_field_values(fields)
-        self._validate_consistency_rules(fields)
+        # Perform comprehensive validation with version awareness
+        self._validate_essential_fields(fields, cif_version)
+        self._validate_field_values(fields, cif_version)
+        self._validate_consistency_rules(fields, cif_version)
         
-        # Generate conference-ready report
+        # Generate validation report
         return self._generate_validation_report(fields)
     
     def _extract_fields(self, cif_content: str) -> Dict[str, str]:
@@ -100,23 +148,82 @@ class ED3DValidator:
         
         return fields
     
-    def _detect_3d_ed_method(self, fields: Dict[str, str]) -> bool:
+    def _detect_cif_version(self, cif_content: str) -> CIFVersion:
+        """Simple CIF version detection"""
+        if '#\\#CIF_2.0' in cif_content:
+            return CIFVersion.CIF2
+        elif '#\\#CIF_1' in cif_content or any(field.count('.') == 0 for field in re.findall(r'_\w+(?:\.\w+)*', cif_content)):
+            return CIFVersion.CIF1
+        else:
+            # Default to CIF1 if uncertain
+            return CIFVersion.CIF1
+    
+    def _get_version_appropriate_field(self, field_name: str, cif_version: CIFVersion) -> str:
+        """Convert field name to version-appropriate format"""
+        if cif_version == CIFVersion.CIF1:
+            # Convert CIF2 to CIF1 if needed
+            return self.cif2_to_cif1_fields.get(field_name, field_name)
+        elif cif_version == CIFVersion.CIF2:
+            # Convert CIF1 to CIF2 if needed
+            return self.cif1_to_cif2_fields.get(field_name, field_name)
+        else:
+            return field_name
+    
+    def _check_field_exists(self, fields: Dict[str, str], field_name: str, cif_version: CIFVersion) -> Tuple[bool, str]:
+        """Check if a field exists in version-appropriate format"""
+        # Check exact match first
+        if field_name in fields:
+            return True, field_name
+        
+        # Check version-appropriate format
+        version_field = self._get_version_appropriate_field(field_name, cif_version)
+        if version_field in fields:
+            return True, version_field
+        
+        # Check the opposite version format as fallback
+        if cif_version == CIFVersion.CIF1:
+            alt_field = self.cif1_to_cif2_fields.get(field_name, field_name)
+        else:
+            alt_field = self.cif2_to_cif1_fields.get(field_name, field_name)
+        
+        if alt_field in fields:
+            return True, alt_field
+        
+        return False, field_name
+
+    def _detect_3d_ed_method(self, fields: Dict[str, str], cif_version: CIFVersion) -> bool:
         """
-        Detect if this is a 3D ED experiment - critical for conference demo
+        Detect if this is a 3D ED experiment with version awareness
         """
-        # Primary detection: radiation probe
-        probe_field = fields.get('_diffrn_radiation.probe', '').lower()
-        if 'electron' in probe_field:
-            return True
+        # Primary detection: radiation probe (check both CIF1 and CIF2 formats)
+        probe_fields = ['_diffrn_radiation.probe', '_diffrn_radiation_probe']
+        for probe_field in probe_fields:
+            exists, actual_field = self._check_field_exists(fields, probe_field, cif_version)
+            if exists:
+                probe_value = fields.get(actual_field, '').lower()
+                if 'electron' in probe_value:
+                    return True
+        
+        # Check radiation type as well
+        type_fields = ['_diffrn_radiation.type', '_diffrn_radiation_type']
+        for type_field in type_fields:
+            exists, actual_field = self._check_field_exists(fields, type_field, cif_version)
+            if exists:
+                type_value = fields.get(actual_field, '').lower()
+                if 'electron' in type_value:
+                    return True
             
         # Secondary detection: voltage field (specific to electron diffraction)
-        if '_diffrn_source.voltage' in fields:
-            try:
-                voltage = float(fields['_diffrn_source.voltage'])
-                if 80 <= voltage <= 300:  # Typical electron microscope range
-                    return True
-            except ValueError:
-                pass
+        voltage_fields = ['_diffrn_source.voltage', '_diffrn_source_voltage']
+        for voltage_field in voltage_fields:
+            exists, actual_field = self._check_field_exists(fields, voltage_field, cif_version)
+            if exists:
+                try:
+                    voltage = float(fields[actual_field])
+                    if 80 <= voltage <= 300:  # Typical electron microscope range
+                        return True
+                except ValueError:
+                    pass
         
         # Tertiary detection: keywords in detector/source descriptions
         ed_keywords = ['electron', 'tem', 'precession', 'microed', '3d ed', 'cred']
@@ -126,27 +233,29 @@ class ED3DValidator:
                 
         return False
     
-    def _validate_essential_fields(self, fields: Dict[str, str]):
-        """Validate essential fields for conference presentation"""
+    def _validate_essential_fields(self, fields: Dict[str, str], cif_version: CIFVersion):
+        """Validate essential fields for 3D ED with version awareness"""
         essential_fields = self.config.get("required_fields", {}).get("essential", [])
         
         for field in essential_fields:
-            if field in fields:
-                value = fields[field].strip()
+            exists, actual_field = self._check_field_exists(fields, field, cif_version)
+            if exists:
+                value = fields[actual_field].strip()
                 if value and value not in ['?', '.']:
+                    version_note = f" (found as {actual_field})" if actual_field != field else ""
                     self.validation_results.append(
-                        ValidationResult(field, "pass", f"Present: {value}", ValidationLevel.ESSENTIAL)
+                        ValidationResult(field, "pass", f"Present: {value}{version_note}", ValidationLevel.ESSENTIAL)
                     )
                 else:
                     self.validation_results.append(
-                        ValidationResult(field, "fail", "Field present but empty", ValidationLevel.ESSENTIAL)
+                        ValidationResult(field, "fail", f"Field present but empty (found as {actual_field})", ValidationLevel.ESSENTIAL)
                     )
             else:
                 self.validation_results.append(
                     ValidationResult(field, "missing", "Essential field missing", ValidationLevel.ESSENTIAL)
                 )
     
-    def _validate_field_values(self, fields: Dict[str, str]):
+    def _validate_field_values(self, fields: Dict[str, str], cif_version: CIFVersion):
         """Validate specific field values according to 3D ED standards"""
         validations = self.config.get("field_validation", {})
         
@@ -187,7 +296,7 @@ class ED3DValidator:
                         ValidationResult(field, "fail", f"Expected numeric value, found '{value}'", ValidationLevel.ESSENTIAL)
                     )
     
-    def _validate_consistency_rules(self, fields: Dict[str, str]):
+    def _validate_consistency_rules(self, fields: Dict[str, str], cif_version: CIFVersion):
         """Validate consistency rules specific to 3D ED"""
         
         # Rule 1: Voltage-wavelength consistency (relativistic calculation)
@@ -260,7 +369,7 @@ class ED3DValidator:
                 )
     
     def _generate_validation_report(self, fields: Dict[str, str]) -> Dict[str, Any]:
-        """Generate comprehensive validation report for conference presentation"""
+        """Generate comprehensive validation report"""
         
         # Count results by status
         status_counts = {"pass": 0, "fail": 0, "warning": 0, "missing": 0}
@@ -285,8 +394,8 @@ class ED3DValidator:
                 "level": result.level.value
             })
         
-        # Conference-specific summary
-        conference_summary = self._generate_conference_summary(status_counts, fields)
+        # Generate validation summary
+        validation_summary = self._generate_validation_summary(status_counts, fields)
         
         return {
             "method_detected": "3D Electron Diffraction",
@@ -299,15 +408,15 @@ class ED3DValidator:
                 "missing": status_counts["missing"]
             },
             "detailed_results": detailed_results,
-            "conference_summary": conference_summary,
+            "validation_summary": validation_summary,
             "recommendations": self._generate_recommendations()
         }
     
-    def _generate_conference_summary(self, status_counts: Dict, fields: Dict[str, str]) -> str:
-        """Generate a summary suitable for conference presentation"""
+    def _generate_validation_summary(self, status_counts: Dict, fields: Dict[str, str]) -> str:
+        """Generate a summary of validation results"""
         
         if status_counts["fail"] == 0 and status_counts["missing"] == 0:
-            return "✅ CONFERENCE READY: This 3D ED CIF meets all essential validation criteria and follows current best practices."
+            return "✅ VALIDATION PASSED: This 3D ED CIF meets all essential validation criteria and follows current best practices."
         
         issues = []
         if status_counts["missing"] > 0:
@@ -336,6 +445,6 @@ class ED3DValidator:
             recommendations.append("Consider addressing the warnings to improve data quality")
             
         if not recommendations:
-            recommendations.append("Excellent! This CIF is ready for publication and conference presentation.")
+            recommendations.append("Excellent! This CIF is ready for publication.")
             
         return recommendations

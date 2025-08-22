@@ -47,7 +47,7 @@
   - [x] Updated button handlers with intelligent method-specific analysis
   - [x] Fixed syntax highlighting to only highlight line-start field names
   - [x] Real-time method detection and actionable recommendations
-- [x] **CONFERENCE-READY 3D ED VALIDATION**: Specialized validation system for crystallographic presentations
+- [x] **3D ED VALIDATION SYSTEM**: Specialized validation system for 3D electron diffraction
   - [x] Created `ED3DValidator` with relativistic electron wavelength calculations
   - [x] Comprehensive field validation (essential, recommended, method-specific levels)
   - [x] Professional validation reports with actionable recommendations

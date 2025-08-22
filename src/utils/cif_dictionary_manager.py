@@ -105,6 +105,10 @@ class CIFDictionaryManager:
             self._field_positions[current_field] = (start_line, len(lines)-1)
         
         print(f"Indexed {len(self._field_positions)} CIF fields")
+
+    def get_all_field_names(self) -> Set[str]:
+        """Get all available field names from the dictionary"""
+        return set(self._field_positions.keys())
     
     def get_field_info(self, field_name: str) -> Optional[CIFFieldInfo]:
         """

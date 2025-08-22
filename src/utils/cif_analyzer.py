@@ -81,11 +81,17 @@ class CIFAnalyzer:
         # Method detection patterns
         self.method_indicators = {
             CrystallographyMethod.ELECTRON_DIFFRACTION: {
-                'required_fields': ['_diffrn_radiation.probe'],
-                'required_values': {'_diffrn_radiation.probe': ['electron']},
+                'required_fields': ['_diffrn_radiation.probe', '_diffrn_radiation_probe'],  # Both CIF1 and CIF2
+                'required_values': {
+                    '_diffrn_radiation.probe': ['electron'],
+                    '_diffrn_radiation_probe': ['electron'],
+                    '_diffrn_radiation.type': ['electron'],
+                    '_diffrn_radiation_type': ['electron']
+                },
                 'indicator_fields': [
-                    '_diffrn_detector.type', '_exptl_crystal.preparation',
-                    '_diffrn_measurement.device_type', '_diffrn_source.voltage'
+                    '_diffrn_detector.type', '_diffrn_detector_type', '_exptl_crystal.preparation',
+                    '_diffrn_measurement.device_type', '_diffrn_measurement_device_type',
+                    '_diffrn_source.voltage', '_diffrn_source_voltage'
                 ],
                 'keywords': ['electron', 'tem', 'precession', 'microed', '3d ed']
             },
@@ -113,10 +119,16 @@ class CIFAnalyzer:
             },
             
             CrystallographyMethod.NEUTRON_DIFFRACTION: {
-                'required_fields': ['_diffrn_radiation.probe'],
-                'required_values': {'_diffrn_radiation.probe': ['neutron']},
+                'required_fields': ['_diffrn_radiation.probe', '_diffrn_radiation_probe'],  # Both CIF1 and CIF2
+                'required_values': {
+                    '_diffrn_radiation.probe': ['neutron'],
+                    '_diffrn_radiation_probe': ['neutron'],
+                    '_diffrn_radiation.type': ['neutron'],
+                    '_diffrn_radiation_type': ['neutron']
+                },
                 'indicator_fields': [
-                    '_diffrn_radiation_wavelength', '_diffrn_source.type'
+                    '_diffrn_radiation_wavelength', '_diffrn_radiation.wavelength', 
+                    '_diffrn_source.type', '_diffrn_source_type'
                 ],
                 'keywords': ['neutron', 'reactor', 'spallation']
             },
@@ -328,10 +340,14 @@ class CIFAnalyzer:
                 if found_keywords:
                     evidence.append(f"Keywords found: {found_keywords}")
             
-            # Determine if method is detected
+            # Determine if method is detected with stricter criteria
             confidence = min(score / 3.0, 1.0)  # Normalize to 0-1
             
-            if score > 1.0:  # Threshold for detection
+            # For methods with required values, require higher confidence
+            has_required_values = 'required_values' in indicators and indicators['required_values']
+            required_threshold = 3.0 if has_required_values else 1.0
+            
+            if score > required_threshold:  # Stricter threshold for value-specific methods
                 detected_methods.append(method)
                 method_evidence[method.value] = evidence
                 confidence_scores[method.value] = confidence
