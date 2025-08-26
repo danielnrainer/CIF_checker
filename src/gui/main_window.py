@@ -19,6 +19,8 @@ from utils.cif_dictionary_manager import CIFDictionaryManager
 from utils.CIF_parser import CIFParser
 from utils.ed_validator import ED3DValidator
 from utils.cif_converter import CIFConverter
+from utils.field_equivalence_manager import FieldEquivalenceManager
+from utils.cif_stripper import StrippedCIFGenerator
 
 
 class CIFEditor(QMainWindow):
@@ -39,6 +41,12 @@ class CIFEditor(QMainWindow):
         
         # Initialize CIF format converter with dictionary manager
         self.cif_converter = CIFConverter(self.dict_manager)
+        
+        # Initialize field equivalence manager for duplicate prevention
+        self.field_equivalence_manager = FieldEquivalenceManager(self.dict_manager)
+        
+        # Initialize CIF stripper for generating minimal structural CIFs
+        self.cif_stripper = StrippedCIFGenerator()
         
         # Current analysis results
         self.current_analysis = None
@@ -296,6 +304,12 @@ class CIFEditor(QMainWindow):
         
         file_menu.addSeparator()
         
+        # Stripped CIF generation
+        generate_stripped_action = file_menu.addAction("Generate Stripped CIF...")
+        generate_stripped_action.triggered.connect(self.generate_stripped_cif)
+        
+        file_menu.addSeparator()
+        
         exit_action = file_menu.addAction("Exit")
         exit_action.triggered.connect(self.close)
         
@@ -307,6 +321,22 @@ class CIFEditor(QMainWindow):
         
         check_hp_action = action_menu.addAction("Start Checks (HP)")
         check_hp_action.triggered.connect(self.start_checks_hp)
+        
+        action_menu.addSeparator()
+        
+        # Field equivalence management
+        equivalence_menu = action_menu.addMenu("Field Equivalence")
+        
+        check_duplicates_action = equivalence_menu.addAction("Check for Duplicate Fields")
+        check_duplicates_action.triggered.connect(self.check_duplicate_fields)
+        
+        resolve_duplicates_action = equivalence_menu.addAction("Resolve Duplicate Fields")
+        resolve_duplicates_action.triggered.connect(self.resolve_duplicate_fields)
+        
+        equivalence_menu.addSeparator()
+        
+        format_consistency_action = equivalence_menu.addAction("Check Format Consistency")
+        format_consistency_action.triggered.connect(self.suggest_format_consistent_fields)
         
         action_menu.addSeparator()
         
@@ -635,7 +665,61 @@ class CIFEditor(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to save file:\n{e}")
 
     def check_line(self, prefix, default_value=None, multiline=False, description=""):
-        """Check and potentially update a CIF field value."""
+        """Check and potentially update a CIF field value with equivalence checking."""
+        content = self.text_editor.toPlainText()
+        
+        # Check for existing equivalent fields
+        existing_equivalents = self.field_equivalence_manager.check_for_equivalent_fields(content, prefix)
+        
+        if existing_equivalents:
+            # Get the format-consistent field name suggestion
+            suggested_field = self.field_equivalence_manager.suggest_format_consistent_field(content, prefix)
+            
+            # If we have equivalents, handle them appropriately
+            if len(existing_equivalents) == 1 and existing_equivalents[0] == suggested_field:
+                # Use the existing equivalent field
+                prefix = existing_equivalents[0]
+            elif len(existing_equivalents) == 1:
+                # Ask user if they want to convert to consistent format
+                reply = QMessageBox.question(
+                    self, "Field Format Consistency",
+                    f"Found equivalent field '{existing_equivalents[0]}' in the file.\n"
+                    f"For format consistency, we recommend using '{suggested_field}'.\n\n"
+                    f"Would you like to:\n"
+                    f"• Yes: Convert '{existing_equivalents[0]}' to '{suggested_field}'\n"
+                    f"• No: Edit the existing field '{existing_equivalents[0]}' as-is",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    # Convert the existing field
+                    self._convert_field_in_content(existing_equivalents[0], suggested_field)
+                    prefix = suggested_field
+                else:
+                    prefix = existing_equivalents[0]
+            else:
+                # Multiple equivalents - warn about duplicates
+                equivalent_list = '\n'.join(f"  • {field}" for field in existing_equivalents)
+                QMessageBox.warning(
+                    self, "Duplicate Equivalent Fields",
+                    f"Multiple equivalent fields found for '{prefix}':\n{equivalent_list}\n\n"
+                    f"This may cause issues. Consider using the field equivalence cleanup feature.")
+                # Use the first one for editing
+                prefix = existing_equivalents[0]
+        else:
+            # No equivalents exist, suggest format-consistent field name
+            suggested_field = self.field_equivalence_manager.suggest_format_consistent_field(content, prefix)
+            if suggested_field != prefix:
+                reply = QMessageBox.question(
+                    self, "Field Format Consistency", 
+                    f"For consistency with your file format, we recommend using:\n"
+                    f"'{suggested_field}' instead of '{prefix}'\n\n"
+                    f"Use the recommended field name?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    prefix = suggested_field
+        
+        # Now proceed with the standard field checking logic
         removable_chars = "'"
         lines = self.text_editor.toPlainText().splitlines()
         
@@ -664,8 +748,60 @@ class CIFEditor(QMainWindow):
                           f"The line starting with '{prefix}' was not found.")
         return self.add_missing_line(prefix, lines, default_value, multiline, description)
 
+    def _convert_field_in_content(self, old_field: str, new_field: str):
+        """Convert a field name in the current content"""
+        content = self.text_editor.toPlainText()
+        lines = content.split('\n')
+        
+        for i, line in enumerate(lines):
+            if line.strip().startswith(old_field):
+                # Replace only the field name, preserving the value
+                parts = line.split(maxsplit=1)
+                if len(parts) >= 1:
+                    if len(parts) == 2:
+                        lines[i] = f"{new_field} {parts[1]}"
+                    else:
+                        lines[i] = new_field
+                break
+        
+        self.text_editor.setText('\n'.join(lines))
+
     def add_missing_line(self, prefix, lines, default_value=None, multiline=False, description=""):
-        """Add a missing CIF field with value."""
+        """Add a missing CIF field with value and equivalence checking."""
+        content = self.text_editor.toPlainText()
+        
+        # Check for existing equivalent fields before adding
+        existing_equivalents = self.field_equivalence_manager.check_for_equivalent_fields(content, prefix)
+        
+        if existing_equivalents:
+            # Ask user what to do about existing equivalents
+            equivalent_list = '\n'.join(f"  • {field}" for field in existing_equivalents)
+            reply = QMessageBox.question(
+                self, "Equivalent Fields Found",
+                f"Found existing equivalent field(s) for '{prefix}':\n{equivalent_list}\n\n"
+                f"Would you like to:\n"
+                f"• Yes: Edit the existing equivalent field instead\n"
+                f"• No: Add the new field anyway (may create duplicates)",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # Edit the existing field instead
+                return self.check_line(existing_equivalents[0], default_value, multiline, description)
+        
+        # Get format-consistent field name
+        suggested_field = self.field_equivalence_manager.suggest_format_consistent_field(content, prefix)
+        if suggested_field != prefix:
+            reply = QMessageBox.question(
+                self, "Field Format Consistency",
+                f"For consistency with your file format, we recommend using:\n"
+                f"'{suggested_field}' instead of '{prefix}'\n\n"
+                f"Use the recommended field name?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                prefix = suggested_field
+        
+        # Proceed with adding the field
         value, result = CIFInputDialog.getText(
             self, "Add Missing Line",
             f"The line starting with '{prefix}' is missing.\n\nDescription: {description}\nSuggested value: {default_value}",
@@ -1110,3 +1246,321 @@ class CIFEditor(QMainWindow):
         else:
             QMessageBox.information(self, "Replace All", 
                                   f"Cannot find '{find_text}'")
+
+    def check_duplicate_fields(self):
+        """Check for duplicate equivalent fields in the current content"""
+        content = self.text_editor.toPlainText()
+        
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "No content to check.")
+            return
+        
+        # Get duplicate report
+        duplicates = self.field_equivalence_manager.get_duplicate_prevention_report(content)
+        
+        if not duplicates:
+            QMessageBox.information(self, "No Duplicates Found", 
+                                  "No duplicate equivalent fields found in the current file.")
+            return
+        
+        # Build report message
+        report_lines = ["Duplicate equivalent fields found:\n"]
+        for canonical_field, field_list in duplicates.items():
+            report_lines.append(f"Group '{canonical_field}':")
+            for field in field_list:
+                report_lines.append(f"  • {field}")
+            report_lines.append("")
+        
+        report_lines.append("These fields are equivalent and may cause confusion or errors.")
+        report_lines.append("Use 'Resolve Duplicate Fields' to automatically fix them.")
+        
+        QMessageBox.warning(self, "Duplicate Fields Found", '\n'.join(report_lines))
+
+    def resolve_duplicate_fields(self):
+        """Resolve duplicate equivalent fields in the current content"""
+        content = self.text_editor.toPlainText()
+        
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "No content to resolve.")
+            return
+        
+        # Check for duplicates first
+        duplicates = self.field_equivalence_manager.get_duplicate_prevention_report(content)
+        
+        if not duplicates:
+            QMessageBox.information(self, "No Duplicates", 
+                                  "No duplicate equivalent fields found.")
+            return
+        
+        # Ask user for confirmation
+        duplicate_count = sum(len(fields) - 1 for fields in duplicates.values())
+        reply = QMessageBox.question(
+            self, "Resolve Duplicates",
+            f"Found {len(duplicates)} groups with duplicate equivalent fields.\n"
+            f"This will remove {duplicate_count} duplicate field(s) and standardize field names.\n\n"
+            f"This action cannot be undone. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        try:
+            # Resolve duplicates
+            cleaned_content, changes = self.field_equivalence_manager.resolve_duplicates(content)
+            
+            if changes:
+                # Update the editor
+                self.text_editor.setText(cleaned_content)
+                self.modified = True
+                self.update_status_bar()
+                
+                # Show summary of changes
+                change_summary = '\n'.join(changes[:10])  # Show first 10 changes
+                if len(changes) > 10:
+                    change_summary += f'\n... and {len(changes) - 10} more changes'
+                
+                QMessageBox.information(self, "Duplicates Resolved",
+                                      f"Successfully resolved duplicate fields:\n\n{change_summary}")
+            else:
+                QMessageBox.information(self, "No Changes", "No changes were needed.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error resolving duplicates:\n{str(e)}")
+
+    def show_field_equivalence_info(self, field_name: str):
+        """Show information about field equivalences for a given field"""
+        equivalents = self.field_equivalence_manager.get_all_equivalents(field_name)
+        canonical = self.field_equivalence_manager.get_equivalence_group(field_name)
+        
+        if len(equivalents) <= 1:
+            QMessageBox.information(self, "Field Information", 
+                                  f"Field '{field_name}' has no known equivalents.")
+            return
+        
+        equiv_list = '\n'.join(f"  • {field}" for field in sorted(equivalents))
+        
+        QMessageBox.information(self, "Field Equivalents",
+                              f"Equivalent fields for '{field_name}':\n\n{equiv_list}\n\n"
+                              f"Canonical form: {canonical}")
+
+    def suggest_format_consistent_fields(self):
+        """Suggest format-consistent field names for the current content"""
+        content = self.text_editor.toPlainText()
+        
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "No content to analyze.")
+            return
+        
+        # Detect current format
+        present_fields = self.field_equivalence_manager._extract_fields_from_content(content)
+        cif_version = self.cif_analyzer._detect_cif_version(content, present_fields)[0]
+        
+        suggestions = []
+        for field in present_fields:
+            suggested = self.field_equivalence_manager.suggest_format_consistent_field(content, field)
+            if suggested != field:
+                suggestions.append(f"{field} → {suggested}")
+        
+        if not suggestions:
+            format_name = "CIF 2.0" if cif_version.name == "CIF2" else "CIF 1.0"
+            QMessageBox.information(self, "Format Consistency",
+                                  f"All fields are already consistent with {format_name} format.")
+            return
+        
+        suggestion_text = '\n'.join(suggestions)
+        reply = QMessageBox.question(
+            self, "Format Consistency Suggestions",
+            f"The following field name changes are suggested for format consistency:\n\n{suggestion_text}\n\n"
+            f"Apply these changes?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # Apply suggestions
+            lines = content.split('\n')
+            changes_made = 0
+            
+            for suggestion in suggestions:
+                old_field, new_field = suggestion.split(' → ')
+                for i, line in enumerate(lines):
+                    if line.strip().startswith(old_field):
+                        parts = line.split(maxsplit=1)
+                        if len(parts) >= 1:
+                            if len(parts) == 2:
+                                lines[i] = f"{new_field} {parts[1]}"
+                            else:
+                                lines[i] = new_field
+                            changes_made += 1
+                            break
+            
+            if changes_made > 0:
+                self.text_editor.setText('\n'.join(lines))
+                self.modified = True
+                self.update_status_bar()
+                QMessageBox.information(self, "Changes Applied",
+                                      f"Applied {changes_made} field name changes for format consistency.")
+    
+    def generate_stripped_cif(self):
+        """Generate a stripped CIF containing only essential crystallographic data."""
+        # Check if we have content to strip
+        content = self.text_editor.toPlainText().strip()
+        if not content:
+            QMessageBox.warning(self, "No Content", 
+                              "Please open or enter a CIF file before generating a stripped version.")
+            return
+        
+        try:
+            # Validate CIF for stripping suitability
+            validation = self.cif_stripper.validate_cif_for_stripping(content)
+            
+            # Show validation results to user
+            validation_msg = "CIF Validation for Stripping:\n\n"
+            validation_msg += f"✓ Suitable for stripping: {'Yes' if validation['is_suitable'] else 'No'}\n"
+            validation_msg += f"✓ Has atomic coordinates: {'Yes' if validation['has_atomic_coordinates'] else 'No'}\n"
+            validation_msg += f"✓ Has symmetry information: {'Yes' if validation['has_symmetry_info'] else 'No'}\n"
+            validation_msg += f"✓ Essential fields present: {validation['total_essential_fields_present']}\n"
+            
+            if validation['missing_critical_fields']:
+                validation_msg += f"\n⚠️ Missing critical fields: {', '.join(validation['missing_critical_fields'])}\n"
+            
+            if validation['recommendations']:
+                validation_msg += "\n📋 Recommendations:\n"
+                for rec in validation['recommendations']:
+                    validation_msg += f"  • {rec}\n"
+            
+            # Ask user if they want to proceed
+            if not validation['is_suitable']:
+                validation_msg += "\n⚠️ This CIF may not be suitable for stripping. Continue anyway?"
+                reply = QMessageBox.question(self, "CIF Validation", validation_msg,
+                                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            else:
+                validation_msg += "\n✅ CIF is suitable for stripping."
+                QMessageBox.information(self, "CIF Validation", validation_msg)
+            
+            # Get output file path
+            default_name = ""
+            if self.current_file:
+                base_name = os.path.splitext(os.path.basename(self.current_file))[0]
+                default_name = f"{base_name}_stripped.cif"
+            
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, 
+                "Save Stripped CIF As",
+                default_name,
+                "CIF files (*.cif);;All files (*.*)"
+            )
+            
+            if not file_path:
+                return
+            
+            # Ask about header options
+            header_choice = self._show_header_options_dialog()
+            
+            if header_choice == 'cancel':
+                return
+            
+            # Handle custom header selection
+            if header_choice == 'custom':
+                header_file, _ = QFileDialog.getOpenFileName(
+                    self,
+                    "Select Header File",
+                    "",
+                    "Text files (*.txt);;All files (*.*)"
+                )
+                
+                if not header_file:
+                    return
+                
+                # Load custom header
+                if not self.cif_stripper.load_custom_header(header_file):
+                    QMessageBox.warning(self, "Header Error", 
+                                      f"Could not load custom header file:\n{header_file}")
+                    return
+            
+            # Generate stripped CIF
+            try:
+                stripped_content = self.cif_stripper.generate_stripped_cif(content, header_choice)
+                
+                # Write to file
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(stripped_content)
+                
+                # Calculate and show statistics
+                original_size = len(content)
+                stripped_size = len(stripped_content)
+                reduction = 100 * (1 - stripped_size / original_size) if original_size > 0 else 0
+                
+                success_msg = f"✅ Stripped CIF generated successfully!\n\n"
+                success_msg += f"📁 Saved to: {file_path}\n"
+                success_msg += f"📊 Statistics:\n"
+                success_msg += f"  • Original size: {original_size:,} characters\n"
+                success_msg += f"  • Stripped size: {stripped_size:,} characters\n"
+                success_msg += f"  • Size reduction: {reduction:.1f}%\n"
+                success_msg += f"  • Header included: {header_choice.title() if header_choice != 'none' else 'No'}\n\n"
+                success_msg += f"📋 The stripped CIF contains only:\n"
+                success_msg += f"  • Structure name (data_ block)\n"
+                success_msg += f"  • Symmetry information\n"
+                success_msg += f"  • Unit cell parameters\n"
+                success_msg += f"  • Atomic coordinates & displacement parameters"
+                
+                QMessageBox.information(self, "Stripped CIF Generated", success_msg)
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Generation Error", 
+                                   f"Failed to generate stripped CIF:\n\n{str(e)}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Validation Error", 
+                               f"Failed to validate CIF for stripping:\n\n{str(e)}")
+    
+    def _show_header_options_dialog(self):
+        """
+        Show dialog with header options for stripped CIF generation.
+        
+        Returns:
+            str: 'default', 'custom', 'none', or 'cancel'
+        """
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QRadioButton, QDialogButtonBox, QLabel
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Header Options")
+        dialog.setModal(True)
+        dialog.resize(350, 200)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Add explanation
+        label = QLabel("Choose header type for the stripped CIF:")
+        layout.addWidget(label)
+        
+        # Radio buttons for options
+        default_radio = QRadioButton("Default header (generic information)")
+        custom_radio = QRadioButton("Custom header (select file)")
+        none_radio = QRadioButton("No header")
+        
+        # Set default selection
+        default_radio.setChecked(True)
+        
+        layout.addWidget(default_radio)
+        layout.addWidget(custom_radio)
+        layout.addWidget(none_radio)
+        
+        # Add buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        
+        # Show dialog and get result
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            if default_radio.isChecked():
+                return 'default'
+            elif custom_radio.isChecked():
+                return 'custom'
+            elif none_radio.isChecked():
+                return 'none'
+        
+        return 'cancel'

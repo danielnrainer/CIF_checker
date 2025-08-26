@@ -15,12 +15,15 @@ A powerful, high-performance CIF (Crystallographic Information File) viewer and 
 - **📊 Comprehensive analysis** - Method detection, field validation, and detailed reporting
 - **🎨 Advanced syntax highlighting** - Real-time field recognition with proper pattern matching
 - **🔬 Accurate radiation probe detection** - Eliminates false positives in method detection
+- **✂️ Stripped CIF generator** - Create minimal CIF files with only essential crystallographic data
 
 ### **Validation & Standards**
 - **📋 CIF Core Dictionary 3.3.0** (2025) - Latest crystallographic standards with 1,213 alias mappings
 - **🔄 CIF1/CIF2 compatibility** - Automatic format detection and proper header recognition
 - **⚠️ Smart error reporting** - Context-aware validation with helpful suggestions
 - **✨ Dictionary-driven conversion** - Uses actual field definitions rather than pattern matching
+- **🎯 3D ED validation** - Comprehensive field definitions for 3D electron diffraction methods
+- **🔗 Flexible header system** - Default, custom, or no headers for stripped CIF generation
 
 ## 🛠️ Installation
 
@@ -60,6 +63,7 @@ CIF_checker/
 │       ├── cif_dictionary_manager.py   # Lazy-loading CIF dictionary with alias support
 │       ├── cif_analyzer.py             # Comprehensive CIF analysis with method detection
 │       ├── cif_converter.py            # CIF1/CIF2 conversion with dictionary mappings
+│       ├── cif_stripper.py             # Stripped CIF generator for essential data only
 │       └── CIF_field_parsing.py        # Legacy field parsing utilities
 ├── cif_core.dic                        # CIF Core Dictionary (28,871 lines, 1,213 aliases)
 ├── requirements.txt                     # Python dependencies
@@ -68,11 +72,30 @@ CIF_checker/
 
 ## 🎯 Usage
 
+### **Basic Validation**
 1. **Open CIF file** - Use the file browser or drag & drop
 2. **Click "🔬 3D ED Check"** - Get comprehensive 3D electron diffraction validation
 3. **Review results** - Detailed compliance report with validation status
 4. **Address issues** - Clear recommendations for improvement
 
+### **Stripped CIF Generation**
+1. **Select "File → Generate Stripped CIF..."** from the menu
+2. **Choose output location** for the minimal CIF file
+3. **Select header type**:
+   - **Default header** - Professional generic information
+   - **Custom header** - Select your own header file
+   - **No header** - Clean CIF with data only
+4. **Review statistics** - Size reduction and content summary
+
+The stripped CIF generator extracts only:
+- Structure name (data_ block)
+- Space group and symmetry information
+- Unit cell parameters
+- Atomic coordinates and displacement parameters
+
+*All experimental details, metadata, and publication information are removed.*
+
+### **Advanced Features**
 The 3D ED validator automatically:
 - ✅ **Detects 3D ED experiments** with high accuracy
 - ✅ **Validates essential fields** according to CIF Core Dictionary 3.3.0 (2025)
@@ -86,6 +109,15 @@ The 3D ED validator automatically:
 3. **Syntax highlighting** - Navigate through your CIF with intelligent field highlighting
 
 ## 🔧 Advanced Features
+
+### Stripped CIF Generation
+Create minimal CIF files containing only essential crystallographic data:
+- **Essential data only** - Symmetry, unit cell, and atomic coordinates
+- **Remove metadata** - Experimental details and database information stripped out
+- **Flexible headers** - Default, custom, or no headers with institutional customization
+- **Validation checks** - Ensures stripped CIF contains meaningful structural data
+
+See [STRIPPED_CIF_GENERATOR.md](STRIPPED_CIF_GENERATOR.md) for detailed documentation.
 
 ### Method Detection
 Automatically detects crystallographic methods with high precision:

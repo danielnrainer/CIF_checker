@@ -1,8 +1,14 @@
 {
   "name": "3D Electron Diffraction (3D ED)",
-  "description": "Validation profile for 3D electron diffraction structure determination",
-  "version": "2025.1",
+  "description": "Comprehensive validation profile for 3D electron diffraction structure determination",
+  "version": "2025.2",
   "cif_core_version": "3.3.0",
+  "last_updated": "2025-08-22",
+  "references": [
+    "https://github.com/COMCIFS/cif_ed/blob/main/docs/recommendations.md",
+    "CIF Core Dictionary 3.3.0 (2025)",
+    "Manual field definitions from previous CIF_checker versions"
+  ],
   
   "method_detection": {
     "required_fields": ["_diffrn_radiation.probe"],
@@ -12,90 +18,305 @@
     "indicator_fields": [
       "_diffrn_source.voltage",
       "_diffrn_detector.type", 
+      "_diffrn_detector.make",
       "_exptl_crystal.preparation",
-      "_diffrn_measurement.device_type"
+      "_diffrn_measurement.device_type",
+      "_diffrn_measurement.device_make",
+      "_diffrn_measurement.method_precession",
+      "_diffrn_source.ed_diffracting_area_selection"
     ],
-    "keywords": ["electron", "tem", "precession", "microed", "3d ed", "cred", "pedt"]
+    "keywords": ["electron", "tem", "precession", "microed", "3d ed", "cred", "pedt", "nanocrystal"]
   },
   
   "required_fields": {
     "essential": [
       "_diffrn_radiation.probe",
-      "_diffrn_radiation.wavelength",
+      "_diffrn_radiation_wavelength.value",
       "_diffrn_source.voltage", 
-      "_diffrn_detector.type",
+      "_diffrn_detector.description",
+      "_diffrn_detector.make",
       "_exptl_crystal.size_max",
       "_exptl_crystal.size_mid", 
       "_exptl_crystal.size_min",
-      "_cell_measurement_temperature",
-      "_diffrn_ambient_temperature",
-      "_diffrn_ambient_environment"
+      "_diffrn.ambient_temperature",
+      "_diffrn.ambient_environment",
+      "_exptl_crystal.description",
+      "_exptl.crystals_number"
     ],
     
     "highly_recommended": [
-      "_diffrn_source.type",
-      "_diffrn_source_details",
-      "_diffrn_detector",
+      "_diffrn_source.description",
+      "_diffrn_source.make",
       "_exptl_crystal.colour",
-      "_exptl_crystal.description",
       "_exptl_crystal.preparation",
-      "_diffrn_measurement.device_type",
+      "_diffrn_measurement.device_class",
+      "_diffrn_measurement.device_make",
       "_diffrn_measurement.method",
-      "_diffrn_radiation.monochromator"
+      "_diffrn_measurement.rotation_mode",
+      "_diffrn_measurement.specimen_support",
+      "_diffrn_radiation.monochromator",
+      "_cell_measurement.temperature",
+      "_refine.diffraction_theory"
     ],
     
     "method_specific": [
       "_diffrn_detector.area_resol_mean",
-      "_diffrn_detector.pixel_size", 
       "_diffrn_source.current",
       "_diffrn_measurement.specimen_support",
-      "_exptl_crystal.mounting_method"
+      "_diffrn_measurement.method_precession",
+      "_diffrn.precession_semi_angle",
+      "_diffrn_measurement.sample_tracking",
+      "_diffrn_measurement.sample_tracking_method",
+      "_diffrn_radiation.illumination_mode",
+      "_diffrn_source.size",
+      "_diffrn_source.ed_diffracting_area_selection",
+      "_diffrn_source.convergence_angle",
+      "_exptl_crystal.mosaicity",
+      "_exptl_crystal.mosaic_method",
+      "_exptl_crystal.mosaic_block_size",
+      "_refine.diffraction_theory_details",
+      "_refine_diff.potential_max",
+      "_refine_diff.potential_min", 
+      "_refine_diff.potential_rms",
+      "_refine_ls.abs_structure_z-score",
+      "_refine_ls.sample_thickness",
+      "_refine_ls.sample_shape_expression",
+      "_refine_ls.sample_shape_details",
+      "_diffrn.flux_density",
+      "_diffrn.total_dose",
+      "_diffrn.total_exposure_time",
+      "_exptl.special_details"
+    ],
+
+    "legacy_cif1_fields": {
+      "note": "These are CIF1 format fields that should be converted to CIF2 equivalents",
+      "mappings": {
+        "_cell_measurement_temperature": "_cell_measurement.temperature",
+        "_diffrn_ambient_temperature": "_diffrn.ambient_temperature", 
+        "_diffrn_ambient_environment": "_diffrn.ambient_environment",
+        "_diffrn_radiation_wavelength": "_diffrn_radiation_wavelength.value",
+        "_diffrn_radiation_probe": "_diffrn_radiation.probe",
+        "_diffrn_radiation_type": "_diffrn_radiation.type",
+        "_diffrn_radiation_monochromator": "_diffrn_radiation.monochromator",
+        "_diffrn_source": "_diffrn_source.description",
+        "_diffrn_source_type": "_diffrn_source.make",
+        "_diffrn_source_details": "_diffrn_source.make",
+        "_diffrn_source_voltage": "_diffrn_source.voltage",
+        "_diffrn_detector": "_diffrn_detector.description",
+        "_diffrn_detector_type": "_diffrn_detector.make",
+        "_diffrn_measurement_device": "_diffrn_measurement.device_class",
+        "_diffrn_measurement_device_type": "_diffrn_measurement.device_make",
+        "_diffrn_measurement_method": "_diffrn_measurement.method",
+        "_diffrn_measurement_specimen_support": "_diffrn_measurement.specimen_support",
+        "_exptl_crystal_colour": "_exptl_crystal.colour",
+        "_exptl_crystal_description": "_exptl_crystal.description",
+        "_exptl_crystal_preparation": "_exptl_crystal.preparation"
+      }
+    }
+  },
+
+  "method_specific": {
+    "3D_ED": {
+      "requires_any": [
+        "_diffrn_measurement.method_precession",
+        "_diffrn.precession_semi_angle",
+        "_diffrn_radiation.illumination_mode"
+      ],
+      "recommended": [
+        "_diffrn_source.convergence_angle",
+        "_diffrn_source.ed_diffracting_area_selection",
+        "_diffrn_measurement.sample_tracking",
+        "_diffrn_measurement.sample_tracking_method",
+        "_exptl_crystal.mosaicity",
+        "_exptl_crystal.mosaic_method",
+        "_refine.diffraction_theory_details",
+        "_refine_ls.sample_thickness"
+      ]
+    },
+    
+    "continuous_rotation": {
+      "requires_any": [
+        "_diffrn_measurement.method",
+        "_diffrn_scan.type"
+      ],
+      "recommended": [
+        "_diffrn_scan.start_angle",
+        "_diffrn_scan.end_angle",
+        "_diffrn_scan.step_size",
+        "_diffrn_scan.rate",
+        "_diffrn.total_exposure_time"
+      ]
+    },
+
+    "stepwise_rotation": {
+      "requires_any": [
+        "_diffrn_measurement.method",
+        "_diffrn_scan.step_size"
+      ],
+      "recommended": [
+        "_diffrn_scan.start_angle",
+        "_diffrn_scan.end_angle",
+        "_diffrn_scan.rate",
+        "_diffrn.total_exposure_time",
+        "_diffrn_scan.number_of_images"
+      ]
+    },
+
+    "precession": {
+      "requires": [
+        "_diffrn.precession_semi_angle",
+        "_diffrn_measurement.method_precession"
+      ],
+      "recommended": [
+        "_diffrn_source.convergence_angle",
+        "_exptl_crystal.mosaic_method",
+        "_diffrn_measurement.sample_tracking"
+      ]
+    }
+  },
+
+  "comcifs_recommendations": {
+    "experimental_description": [
+      "_diffrn_source.type",
+      "_diffrn_source.voltage", 
+      "_diffrn_source.size",
+      "_diffrn_radiation.wavelength",
+      "_diffrn_radiation.type",
+      "_diffrn_radiation.illumination_mode",
+      "_diffrn_source.convergence_angle"
+    ],
+    
+    "detector_specifications": [
+      "_diffrn_detector.type",
+      "_diffrn_detector.make",
+      "_diffrn_detector.details",
+      "_diffrn_detector.binning",
+      "_diffrn_detector.pixel_size_x",
+      "_diffrn_detector.pixel_size_y"
+    ],
+    
+    "measurement_methods": [
+      "_diffrn_measurement.method",
+      "_diffrn_measurement.device_class",
+      "_diffrn_measurement.device_type",
+      "_diffrn_measurement.specimen_support",
+      "_diffrn_measurement.method_precession",
+      "_diffrn.precession_semi_angle"
+    ],
+    
+    "sample_tracking": [
+      "_diffrn_measurement.sample_tracking",
+      "_diffrn_measurement.sample_tracking_method",
+      "_diffrn_source.ed_diffracting_area_selection"
+    ],
+    
+    "refinement_theory": [
+      "_refine.diffraction_theory_details",
+      "_refine_diff.potential_max",
+      "_refine_diff.potential_min",
+      "_refine_diff.potential_rms",
+      "_refine_ls.sample_thickness",
+      "_refine_ls.sample_shape_expression"
     ]
   },
   
   "field_validation": {
     "_diffrn_radiation.probe": {
       "required_value": "electron",
-      "case_sensitive": false
+      "case_sensitive": false,
+      "priority": "critical"
     },
     
     "_diffrn_source.voltage": {
       "type": "numeric",
       "units": "kV",
       "typical_range": [80, 300],
-      "common_values": [80, 120, 200, 300]
+      "common_values": [80, 120, 200, 300],
+      "priority": "essential"
     },
     
     "_diffrn_radiation.wavelength": {
       "type": "numeric", 
       "units": "Å",
-      "calculation": "λ = h/p where p = √[(E_kinetic + mc²)² - (mc²)²]/c - relativistic de Broglie wavelength",
+      "calculation": "λ = h/p where p = √[(E_kinetic + mc²)² - (mc²)²]/c",
       "typical_range": [0.0197, 0.0411],
-      "note": "Calculated using correct relativistic momentum formula for accurate voltage-wavelength consistency"
+      "note": "Calculated using relativistic momentum formula for voltage-wavelength consistency",
+      "priority": "essential"
+    },
+
+    "_diffrn.precession_semi_angle": {
+      "type": "numeric",
+      "units": "degrees",
+      "typical_range": [0.5, 3.0],
+      "format_requirements": "numeric value in degrees",
+      "priority": "method_specific"
+    },
+
+    "_diffrn_source.convergence_angle": {
+      "type": "numeric", 
+      "units": ["milliradians", "degrees"],
+      "typical_range": [0.1, 10.0],
+      "format_requirements": "numeric value in milliradians or degrees",
+      "priority": "recommended"
+    },
+
+    "_refine_ls.sample_thickness": {
+      "type": "numeric",
+      "units": ["micrometers", "nanometers"],
+      "typical_range": [10, 500],
+      "format_requirements": "numeric value in micrometers or nanometers",
+      "priority": "recommended"
+    },
+
+    "_diffrn.total_dose": {
+      "type": "numeric",
+      "units": "e-/Å²",
+      "typical_range": [0.1, 50.0],
+      "format_requirements": "numeric value in e-/Å²",
+      "priority": "recommended"
     },
     
     "_diffrn_ambient_environment": {
       "allowed_values": ["vacuum", "helium", "nitrogen", "air", "cryogenic"],
-      "default": "vacuum"
+      "default": "vacuum",
+      "priority": "standard"
+    },
+
+    "_diffrn_radiation.illumination_mode": {
+      "allowed_values": ["parallel", "convergent", "focused"],
+      "priority": "method_specific"
+    },
+
+    "_diffrn_measurement.sample_tracking": {
+      "allowed_values": ["yes", "no", "partial"],
+      "priority": "method_specific"
+    },
+
+    "_exptl_crystal.mosaic_method": {
+      "allowed_values": ["spherical", "anisotropic", "isotropic"],
+      "priority": "method_specific"
     },
     
     "_exptl_crystal.size_max": {
       "type": "numeric",
       "units": "μm", 
       "typical_range": [0.1, 20.0],
-      "note": "Crystal dimensions should be consistent with electron transparency"
+      "note": "Crystal dimensions should be consistent with electron transparency",
+      "priority": "essential"
     },
     
     "_exptl_crystal.size_mid": {
       "type": "numeric",
       "units": "μm",
-      "constraint": "≤ _exptl_crystal.size_max"
+      "constraint": "≤ _exptl_crystal.size_max",
+      "priority": "essential"
     },
     
     "_exptl_crystal.size_min": {
       "type": "numeric", 
       "units": "μm",
-      "constraint": "≤ _exptl_crystal.size_mid"
+      "constraint": "≤ _exptl_crystal.size_mid",
+      "priority": "essential"
     }
   },
   
@@ -120,26 +341,63 @@
     "cold FEG"
   ],
   
-  "validation_rules": [
-    {
-      "rule": "voltage_wavelength_consistency",
-      "description": "Wavelength should be consistent with accelerating voltage",
-      "check": "Calculate expected wavelength from voltage and compare"
+  "validation_rules": {
+    "required_combinations": [
+      {
+        "description": "3D ED requires either precession method or illumination mode specification",
+        "rule": "if method contains '3D' or 'electron diffraction', then requires one of: _diffrn_measurement.method_precession, _diffrn.precession_semi_angle, _diffrn_radiation.illumination_mode",
+        "priority": "critical"
+      },
+      {
+        "description": "Precession method requires angle specification",
+        "rule": "if _diffrn_measurement.method_precession exists, then _diffrn.precession_semi_angle must be present",
+        "priority": "critical"
+      },
+      {
+        "description": "Sample tracking requires method specification", 
+        "rule": "if _diffrn_measurement.sample_tracking exists, then _diffrn_measurement.sample_tracking_method should be present",
+        "priority": "recommended"
+      },
+      {
+        "description": "Voltage-wavelength consistency check",
+        "rule": "Calculate expected wavelength from voltage and compare with reported wavelength",
+        "check": "voltage_wavelength_consistency",
+        "priority": "essential"
+      },
+      {
+        "description": "Crystal dimensions ordering",
+        "rule": "Crystal dimensions should be ordered: max ≥ mid ≥ min", 
+        "check": "crystal_size_ordering",
+        "priority": "essential"
+      },
+      {
+        "description": "Temperature consistency check",
+        "rule": "Cell measurement and diffraction temperatures should be consistent",
+        "check": "temperature_consistency",
+        "priority": "recommended"
+      },
+      {
+        "description": "Detector compatibility for electron diffraction",
+        "rule": "Detector type should be appropriate for electron diffraction",
+        "check": "detector_compatibility",
+        "priority": "recommended"
+      }
+    ],
+    
+    "format_requirements": {
+      "_diffrn.precession_semi_angle": "numeric value in degrees",
+      "_diffrn_source.convergence_angle": "numeric value in milliradians or degrees",
+      "_diffrn_source.voltage": "numeric value in kV",
+      "_refine_ls.sample_thickness": "numeric value in micrometers or nanometers",
+      "_diffrn.total_dose": "numeric value in e-/Å²"
     },
-    {
-      "rule": "crystal_size_ordering", 
-      "description": "Crystal dimensions should be ordered: max ≥ mid ≥ min",
-      "check": "Verify size_max ≥ size_mid ≥ size_min"
-    },
-    {
-      "rule": "temperature_consistency",
-      "description": "Cell measurement and diffraction temperatures should be consistent",
-      "check": "Verify temperatures are within reasonable range"
-    },
-    {
-      "rule": "detector_compatibility",
-      "description": "Detector type should be appropriate for electron diffraction",
-      "check": "Verify detector is suitable for ED experiments"
+    
+    "enumerated_values": {
+      "_diffrn_radiation.illumination_mode": ["parallel", "convergent", "focused"],
+      "_diffrn_measurement.sample_tracking": ["yes", "no", "partial"],
+      "_diffrn_radiation.probe": ["electron", "x-ray", "neutron"],
+      "_exptl_crystal.mosaic_method": ["spherical", "anisotropic", "isotropic"],
+      "_diffrn_ambient_environment": ["vacuum", "helium", "nitrogen", "air", "cryogenic"]
     }
-  ]
+  }
 }

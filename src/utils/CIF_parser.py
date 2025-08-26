@@ -449,30 +449,91 @@ class CIFParser:
                 if len(line) <= 80:
                     return [lines[start_index]], 1
                 else:
-                    # Convert to proper multiline format
-                    return [field_name, ';', value, ';'], 1
+                    # Convert to proper multiline format with line breaking
+                    result_lines = [field_name, ';']
+                    if len(value) > 80:
+                        broken_lines = self._break_long_line(value, 80)
+                        result_lines.extend(broken_lines)
+                    else:
+                        result_lines.append(value)
+                    result_lines.append(';')
+                    return result_lines, 1
             else:
-                # True multiline field - preserve structure
-                field_lines = []
-                i = start_index
+                # True multiline field - preserve structure if already well-formatted
+                field_lines = [lines[start_index]]  # Field name line
+                content_lines = []
+                i = start_index + 1
+                
+                # Collect content until closing semicolon
                 while i < len(lines):
-                    field_lines.append(lines[i])
-                    if lines[i].strip().endswith(';') and i > start_index:
+                    line = lines[i]
+                    if line.strip() == ';' and i > start_index:
+                        # Found closing semicolon
                         break
+                    elif line.strip() != ';':  # Skip opening semicolon
+                        content_lines.append(line)
                     i += 1
+                
+                # Check if any content lines are too long
+                needs_reformatting = any(len(line.strip()) > 80 for line in content_lines)
+                
+                field_lines.append(';')
+                if needs_reformatting:
+                    # Only reformat if there are actually long lines
+                    # Combine only the long lines and preserve structure of short ones
+                    for line in content_lines:
+                        if len(line.strip()) > 80:
+                            # Break this long line
+                            broken_lines = self._break_long_line(line.strip(), 80)
+                            field_lines.extend(broken_lines)
+                        else:
+                            # Keep this line as-is
+                            field_lines.append(line.rstrip())
+                else:
+                    # All lines are fine, preserve original structure
+                    field_lines.extend(line.rstrip() for line in content_lines)
+                
+                field_lines.append(';')
+                
                 return field_lines, i - start_index + 1
         
         # Check if next line is semicolon (multiline field)
         if (start_index + 1 < len(lines) and 
             lines[start_index + 1].strip() == ';'):
-            # Multiline field - collect all lines until closing semicolon
-            field_lines = []
-            i = start_index
+            # Multiline field - preserve structure if already well-formatted
+            field_name = lines[start_index].strip()
+            content_lines = []
+            i = start_index + 2  # Skip field name and opening semicolon
+            
+            # Collect content until closing semicolon
             while i < len(lines):
-                field_lines.append(lines[i])
-                if (lines[i].strip() == ';' and i > start_index + 1):
+                line = lines[i]
+                if line.strip() == ';':
+                    # Found closing semicolon
                     break
+                content_lines.append(line)
                 i += 1
+            
+            # Check if any content lines are too long
+            needs_reformatting = any(len(line.strip()) > 80 for line in content_lines)
+            
+            field_lines = [field_name, ';']
+            if needs_reformatting:
+                # Only reformat if there are actually long lines
+                for line in content_lines:
+                    if len(line.strip()) > 80:
+                        # Break this long line
+                        broken_lines = self._break_long_line(line.strip(), 80)
+                        field_lines.extend(broken_lines)
+                    else:
+                        # Keep this line as-is
+                        field_lines.append(line.rstrip())
+            else:
+                # All lines are fine, preserve original structure
+                field_lines.extend(line.rstrip() for line in content_lines)
+            
+            field_lines.append(';')
+            
             return field_lines, i - start_index + 1
         
         # Check if value is on the next line (field name alone on first line)
@@ -498,20 +559,29 @@ class CIFParser:
                     formatted_line = f"{field_name}    {value}"
                 return [formatted_line], 2
             else:
-                # Too long even when combined, convert to multiline
+                # Too long even when combined, convert to multiline with proper line breaking
                 value = value_line.strip()
                 if value.startswith("'") and value.endswith("'"):
                     value = value[1:-1]
                 elif value.startswith('"') and value.endswith('"'):
                     value = value[1:-1]
-                return [field_name, ';', value, ';'], 2
+                
+                # Break long value into multiple lines
+                result_lines = [field_name, ';']
+                if len(value) > 80:
+                    broken_lines = self._break_long_line(value, 80)
+                    result_lines.extend(broken_lines)
+                else:
+                    result_lines.append(value)
+                result_lines.append(';')
+                return result_lines, 2
         
         # Single line field
         original_line = lines[start_index]
         if len(original_line.strip()) <= 80:
             return [original_line], 1
         else:
-            # Line is too long, need to convert to multiline
+            # Line is too long, need to convert to multiline with proper line breaking
             parts = line.split(None, 1)
             if len(parts) == 2:
                 field_name, value = parts
@@ -520,7 +590,16 @@ class CIFParser:
                     value = value[1:-1]
                 elif value.startswith('"') and value.endswith('"'):
                     value = value[1:-1]
-                return [field_name, ';', value, ';'], 1
+                
+                # Break long value into multiple lines
+                result_lines = [field_name, ';']
+                if len(value) > 80:
+                    broken_lines = self._break_long_line(value, 80)
+                    result_lines.extend(broken_lines)
+                else:
+                    result_lines.append(value)
+                result_lines.append(';')
+                return result_lines, 1
             else:
                 # Field with no value or malformed, preserve as-is
                 return [original_line], 1
