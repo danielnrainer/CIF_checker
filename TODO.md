@@ -172,11 +172,33 @@
   - [ ] Better visual feedback for field status
   - [ ] Drag-and-drop file support
 
-## 📝 Notes for Manual Updates
-- Add any subjective or personal field definition preferences here
-- Note any specific requirements for your research group/institution
-- Track any changes needed based on user feedback
-- Record any specific electron diffraction requirements not covered by CIF core
+## 📝 Notes for Manual Field Definitions Review
+
+### Key Areas Requiring Manual Attention:
+
+**🎯 CONTEXT:** Most 3D ED fields are now officially supported in CIF Core Dictionary 3.3.0 (added by NanED working group), so focus on validation rules rather than field existence.
+
+**📍 PRIORITY REVIEW SECTIONS:**
+1. **Legacy CIF1 Mappings (lines 87-109):** Verify field name conversions
+2. **Field Validation Rules (lines 200-350):** Check allowed values, ranges, units
+3. **Equipment Lists (lines 350-370):** Update detector/source models
+4. **Business Logic (lines 371-404):** Review validation rule combinations
+
+**✅ CONFIRMED OFFICIAL FIELDS:** These 3D ED fields are officially in CIF Core 3.3.0:
+- `_diffrn.precession_semi_angle`
+- `_diffrn_measurement.method_precession`  
+- `_diffrn_measurement.sample_tracking`
+- `_diffrn_source.convergence_angle`
+- `_diffrn_source.ed_diffracting_area_selection`
+- `_refine_ls.sample_thickness`
+- `_exptl_crystal.mosaicity`
+- And many more electron diffraction specific fields
+
+**🔍 QUESTIONS TO CONSIDER DURING REVIEW:**
+- Are the typical ranges and allowed values appropriate for your use cases?
+- Are there any missing detector models or electron sources?
+- Do the validation rules match current best practices?
+- Are priority classifications (essential/recommended) accurate?
 
 ## 🗓️ Updated Timeline (August 2025)
 
@@ -192,16 +214,46 @@
 - **Enhanced field editing dialog** with improved UX
 - **CIF stripper utility** with flexible header system
 
-### 🎯 **NEXT PHASE** (Phase 6): Testing & Polish
-1. **Immediate (1-2 weeks):** User testing and bug fixes
-   - Test all new features thoroughly
-   - Address any usability issues
-   - Performance optimization
+### 🎯 **CURRENT PHASE** (Phase 6): Field Definitions Review & Testing
+**Manual Review Priority Tasks for field_definitions_3d_ed.json:**
 
-2. **Following weeks:** Documentation and release preparation
-   - Update all documentation files
-   - Prepare for stable release
-   - Community feedback integration
+1. **🔍 IMMEDIATE (Manual Review Required):**
+   - [ ] **Review Legacy CIF1 Field Mappings** (lines 87-109)
+     - Verify all CIF1 → CIF2 mappings are correct
+     - Check for missing or incorrect field conversions
+     - Ensure proper handling of wavelength field variations
+   
+   - [ ] **Update Field Validation Rules** (lines 200-350)
+     - Review allowed values for enumerated fields
+     - Verify typical ranges for numeric fields
+     - Check priority classifications (essential/recommended/method_specific)
+     - Validate units and format requirements
+   
+   - [ ] **Update Equipment Lists** (lines 350-370)
+     - Add current detector models (Rigaku, ASI, etc.)
+     - Update electron source types
+     - Remove obsolete equipment entries
+   
+   - [ ] **Review Business Logic Rules** (lines 371-404)
+     - Verify validation rule descriptions
+     - Check required field combinations
+     - Ensure temperature/voltage consistency checks are appropriate
+
+2. **✅ STATUS CHECK (Post-Manual Review):**
+   - [ ] **Field Coverage Analysis:**
+     - Verify all essential CIF Core 3.3.0 3D ED fields are included
+     - Check for any missing official electron diffraction fields
+     - Identify any truly non-standard "community" fields that need special marking
+   
+   - [ ] **Validation Logic Testing:**
+     - Test field validation against real 3D ED CIF files
+     - Verify voltage-wavelength consistency calculations
+     - Check crystal size ordering validation
+
+3. **🧪 TESTING & POLISH:**
+   - Test all new features thoroughly
+   - Address any usability issues discovered during field review
+   - Performance optimization if needed
 
 ### 🔮 **FUTURE PHASES**: Advanced Features
 - Plugin architecture for custom validators
