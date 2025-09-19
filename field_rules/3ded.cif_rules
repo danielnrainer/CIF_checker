@@ -123,13 +123,13 @@ _refine_ls.sample_shape_expression  .
 _refine_ls.sample_shape_details    .
 
 # _diffrn.flux_density: Beam flux density, for electrons in e-/Å^2
-_diffrn.flux_density: ?
+_diffrn.flux_density    ?
 
 # _diffrn.total_dose: Total electron dose in MGy, probably not sensible unless crystal volume known
-_diffrn.total_dose: ?
+_diffrn.total_dose    ?
 
 # _diffrn.total_exposure_time: Total exposure time in minutes 
-_diffrn.total_exposure_time: ?
+_diffrn.total_exposure_time   ?
 
 
 

@@ -16,6 +16,9 @@ from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, get_r
 from utils.cif2_only_extensions import ExtendedCIFDictionaryManager
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
+from services.file_manager import CIFFileManager
+from services.settings_manager import SettingsManager
+from services.validation_controller import ValidationController
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
                      RESULT_ABORT, RESULT_STOP_SAVE)
 from .dialogs.dictionary_info_dialog import DictionaryInfoDialog
@@ -28,14 +31,16 @@ from .editor import CIFSyntaxHighlighter, CIFTextEditor
 class CIFEditor(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.current_file = None
-        self.modified = False
-        self.recent_files = []
-        self.max_recent_files = 5
         
-        # Initialize field checker and CIF parser
-        self.field_checker = CIFFieldChecker()
-        self.cif_parser = CIFParser()
+        # Initialize file manager
+        self.file_manager = CIFFileManager(parent_widget=self)
+        
+        # Initialize settings manager
+        self.settings_manager = SettingsManager(parent=self)
+        
+        # Initialize validation controller
+        self.validation_controller = ValidationController(parent=self)
+        
         config_path = os.path.dirname(__file__)
         
         # Initialize CIF dictionary manager and format converter
@@ -44,21 +49,41 @@ class CIFEditor(QMainWindow):
         self.format_converter = CIFFormatConverter(self.dict_manager)
         self.current_cif_version = CIFVersion.UNKNOWN
         
-        # Initialize field definition validator
-        self.field_rules_validator = FieldRulesValidator(self.dict_manager, self.format_converter)
-        
-        # Load field definition set from field_rules directory
-        field_rules_dir = get_resource_path('field_rules')
-        self.field_checker.load_field_set('3DED', os.path.join(field_rules_dir, '3ded.cif_rules'))
-        self.field_checker.load_field_set('HP', os.path.join(field_rules_dir, 'hp.cif_rules'))
-        
-        # Field definition selection variables
-        self.custom_field_rules_file = None
-        self.current_field_set = '3DED'  # Default to 3DED
+        # Maintain backwards compatibility - delegate to validation controller
+        self.field_checker = self.validation_controller.get_field_checker()
+        self.cif_parser = self.validation_controller.get_cif_parser()
         
         self.init_ui()
+        self.setup_file_manager_callbacks()
+        self.setup_settings_manager_callbacks()
+        self.setup_validation_controller_callbacks()
         self.update_dictionary_status()
         self.select_initial_file()
+    
+    @property
+    def field_rules_validator(self):
+        """Get field rules validator from validation controller."""
+        return self.validation_controller.field_rules_validator
+    
+    @property
+    def current_field_set(self):
+        """Get current field set from validation controller."""
+        return self.validation_controller.current_field_set
+    
+    @current_field_set.setter
+    def current_field_set(self, value):
+        """Set current field set in validation controller."""
+        self.validation_controller.current_field_set = value
+    
+    @property
+    def custom_field_rules_file(self):
+        """Get custom field rules file path from validation controller."""
+        return self.validation_controller.custom_field_rules_file
+    
+    @custom_field_rules_file.setter
+    def custom_field_rules_file(self, value):
+        """Set custom field rules file path in validation controller."""
+        self.validation_controller.custom_field_rules_file = value
 
     def load_settings(self):
         """Load editor settings - delegated to text editor component"""
@@ -136,10 +161,10 @@ class CIFEditor(QMainWindow):
         
         self.radio_3ded = QRadioButton("3D ED")
         self.radio_3ded.setChecked(True)  # Default selection
-        self.radio_3ded.toggled.connect(lambda checked: self.set_field_set('3DED') if checked else None)
+        self.radio_3ded.toggled.connect(lambda checked: self.validation_controller.set_field_set('3DED') if checked else None)
         
         self.radio_custom = QRadioButton("Custom File")
-        self.radio_custom.toggled.connect(lambda checked: self.set_field_set('Custom') if checked else None)
+        self.radio_custom.toggled.connect(lambda checked: self.validation_controller.set_field_set('Custom') if checked else None)
         
         # Add radio buttons to group and layout
         self.field_rules_group.addButton(self.radio_3ded)
@@ -171,7 +196,7 @@ class CIFEditor(QMainWindow):
         
         # Create buttons
         start_checks_button = QPushButton("Start Checks")
-        start_checks_button.clicked.connect(self.start_checks)
+        start_checks_button.clicked.connect(self.validation_controller.start_checks)
         refine_details_button = QPushButton("Edit Refinement Special Details")
         refine_details_button.clicked.connect(self.check_refine_special_details)
         format_button = QPushButton("Reformat File")
@@ -209,7 +234,7 @@ class CIFEditor(QMainWindow):
         action_menu = menubar.addMenu("Actions")
         
         start_checks_action = action_menu.addAction("Start Checks")
-        start_checks_action.triggered.connect(self.start_checks)
+        start_checks_action.triggered.connect(self.validation_controller.start_checks)
         
         refine_details_action = action_menu.addAction("Edit Refinement Special Details")
         refine_details_action.triggered.connect(self.check_refine_special_details)
@@ -317,217 +342,173 @@ class CIFEditor(QMainWindow):
         
         # Field definition validation
         validate_field_defs_action = settings_menu.addAction("Validate Field Rules...")
-        validate_field_defs_action.triggered.connect(self.validate_field_rules)
+        validate_field_defs_action.triggered.connect(self.validation_controller.validate_field_rules)
         
         # Enable undo/redo
         self.text_editor.setUndoRedoEnabled(True)
 
+    def setup_file_manager_callbacks(self):
+        """Set up callbacks for file manager to communicate with UI."""
+        self.file_manager.register_callbacks(
+            on_file_opened=self._on_file_opened,
+            on_file_saved=self._on_file_saved,
+            on_recent_files_updated=self._on_recent_files_updated,
+            on_error=self._on_file_manager_error
+        )
+    
+    def setup_settings_manager_callbacks(self):
+        """Set up callbacks for settings manager to communicate with UI."""
+        self.settings_manager.set_callbacks(
+            status_callback=lambda msg, timeout: self.status_bar.showMessage(msg, timeout),
+            dictionary_status_callback=self.update_dictionary_status,
+            text_content_callback=lambda: self.text_editor.toPlainText()
+        )
+        
+        # Initialize the settings manager with current dictionary manager
+        self.settings_manager.set_dictionary_manager(self.dict_manager)
+    
+    def setup_validation_controller_callbacks(self):
+        """Set up callbacks for validation controller to communicate with UI."""
+        self.validation_controller.set_callbacks(
+            text_content_callback=lambda: self.text_editor.toPlainText(),
+            set_text_callback=lambda content: self.text_editor.setText(content),
+            status_callback=lambda msg, timeout: self.status_bar.showMessage(msg, timeout),
+            title_callback=lambda title: self.setWindowTitle(title)
+        )
+        
+        # Initialize the validation controller with dictionary components
+        self.validation_controller.set_dictionary_components(self.dict_manager, self.format_converter)
+    
+    def _on_file_opened(self, filepath: str, content: str):
+        """Handle file opened event from file manager."""
+        self.text_editor.setText(content)
+        
+        # Detect CIF version
+        self.detect_and_update_cif_version(content)
+        
+        self.update_status_bar()
+        self.setWindowTitle(f"EDCIF-check - {filepath}")
+        
+        # Prompt for dictionary suggestions after opening CIF file
+        self.prompt_for_dictionary_suggestions(content)
+    
+    def _on_file_saved(self, filepath: str):
+        """Handle file saved event from file manager."""
+        self.update_status_bar()
+        self.setWindowTitle(f"EDCIF-check - {filepath}")
+    
+    def _on_recent_files_updated(self, recent_files: List[str]):
+        """Handle recent files list updated event."""
+        self.update_recent_files_menu()
+    
+    def _on_file_manager_error(self, title: str, message: str):
+        """Handle file manager errors."""
+        QMessageBox.critical(self, title, message)
+    
+    def _set_modified(self, modified: bool = True):
+        """Set the modified state and update UI."""
+        self.file_manager.set_modified(modified)
+        self.update_status_bar()
+    
+    def _ensure_cif2_header(self, content: str) -> str:
+        """
+        Ensure CIF2 content has proper header.
+        
+        Args:
+            content: CIF file content
+            
+        Returns:
+            Content with CIF2 header if needed
+        """
+        # Detect if this is CIF2 format
+        detected_version = self.dict_manager.detect_cif_version(content)
+        
+        if detected_version == CIFVersion.CIF2:
+            lines = content.splitlines()
+            
+            # Check if CIF2 header already exists in first few lines
+            has_header = any(line.strip().startswith('#\\#CIF_2.0') for line in lines[:5])
+            
+            if not has_header:
+                # Add CIF2 header at the beginning
+                lines.insert(0, '#\\#CIF_2.0')
+                lines.insert(1, '')  # Add empty line after header
+                return '\\n'.join(lines)
+        
+        return content
+
     def select_initial_file(self):
-        file_filter = "CIF Files (*.cif);;All Files (*.*)"
-        self.current_file, _ = QFileDialog.getOpenFileName(
-            self, "Select a CIF File", "", file_filter)
-        if not self.current_file:
-            QMessageBox.information(self, "No File Selected", 
-                                  "Please select a CIF file to continue.")
-        else:
-            self.open_file(initial=True)
+        """Select initial file on startup."""
+        self.file_manager.select_initial_file()
 
     def update_recent_files_menu(self):
+        """Update the recent files menu with current list."""
         self.recent_menu.clear()
-        for filepath in self.recent_files:
+        recent_files = self.file_manager.get_recent_files()
+        for filepath in recent_files:
             action = self.recent_menu.addAction(filepath)
             action.triggered.connect(lambda checked, path=filepath: self.open_recent_file(path))
             
     def open_recent_file(self, filepath):
-        if not filepath or not os.path.exists(filepath):
-            QMessageBox.warning(self, "File Not Found",
-                              f"Could not find file:\n{filepath}")
-            self.recent_files.remove(filepath)
-            self.update_recent_files_menu()
-            return
-        self.current_file = filepath
-        self.open_file(initial=True)
+        """Open a file from recent files list."""
+        self.file_manager.open_recent_file(filepath)
         
     def add_to_recent_files(self, filepath):
-        if filepath in self.recent_files:
-            self.recent_files.remove(filepath)
-        self.recent_files.insert(0, filepath)
-        if len(self.recent_files) > self.max_recent_files:
-            self.recent_files.pop()
-        self.update_recent_files_menu()
+        """Add file to recent files list (now handled by file manager)."""
+        # This method is now handled by the file manager automatically
+        pass
 
     def open_file(self, initial=False):
+        """Open a file using file dialog."""
         if not initial:
-            file_filter = "CIF Files (*.cif);;All Files (*.*)"
-            filepath, _ = QFileDialog.getOpenFileName(
-                self, "Open File", "", file_filter)
-            if not filepath:
-                return
+            self.file_manager.open_file_dialog()
         else:
-            filepath = self.current_file
-
-        try:
-            with open(filepath, "r") as file:
-                content = file.read()
-            self.text_editor.setText(content)
-            self.current_file = filepath
-            self.modified = False
-            
-            # Detect CIF version
-            self.detect_and_update_cif_version(content)
-            
-            self.update_status_bar()
-            self.add_to_recent_files(filepath)
-            self.setWindowTitle(f"EDCIF-check - {filepath}")
-            
-            # Prompt for dictionary suggestions after opening CIF file
-            self.prompt_for_dictionary_suggestions(content)
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open file:\n{e}")
+            # For initial=True, we assume current_file is already set
+            # This case is handled by the file manager's callback system
+            pass
 
     def save_file(self):
-        if self.current_file:
-            reply = QMessageBox.question(self, "Confirm Save",
-                f"Do you want to overwrite the existing file?\n{self.current_file}",
-                QMessageBox.StandardButton.Yes |
-                QMessageBox.StandardButton.No |
-                QMessageBox.StandardButton.Cancel)
-            
-            if reply == QMessageBox.StandardButton.Cancel:
-                return
-            elif reply == QMessageBox.StandardButton.Yes:
-                self.save_to_file(self.current_file)
-            else:
-                self.save_file_as()
-        else:
-            self.save_file_as()
+        """Save current file content."""
+        original_content = self.text_editor.toPlainText()
+        # Ensure CIF2 files have proper header
+        content = self._ensure_cif2_header(original_content)
+        
+        # Update editor if header was added
+        if content != original_content:
+            self.text_editor.setText(content)
+            self._set_modified(True)
+        
+        self.file_manager.save_file(content)
 
     def save_file_as(self):
-        file_filter = "CIF Files (*.cif);;All Files (*.*)"
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, "Save File As", "", file_filter)
-        if filepath:
-            self.save_to_file(filepath)
+        """Save file with new name."""
+        original_content = self.text_editor.toPlainText()
+        # Ensure CIF2 files have proper header
+        content = self._ensure_cif2_header(original_content)
+        
+        # Update editor if header was added
+        if content != original_content:
+            self.text_editor.setText(content)
+            self._set_modified(True)
+        
+        self.file_manager.save_file_as(content)
 
     def validate_cif(self):
         """Basic CIF syntax validation"""
-        text = self.text_editor.toPlainText()
-        lines = text.splitlines()
-        errors = []
-        
-        # Check for basic CIF syntax rules
-        in_multiline = False
-        for i, line in enumerate(lines, 1):
-            # Check for semicolon-delimited values
-            if line.startswith(';'):
-                in_multiline = not in_multiline
-                continue
-                
-            if not in_multiline:
-                # Check for field names
-                if line.strip() and not line.strip().startswith('#'):
-                    if line.strip().startswith('_'):
-                        parts = line.split(maxsplit=1)
-                        if len(parts) < 2:
-                            errors.append(f"Line {i}: Field '{line.strip()}' has no value")
-                    # Check quoted values
-                    elif "'" in line or '"' in line:
-                        quote_char = "'" if "'" in line else '"'
-                        if line.count(quote_char) % 2 != 0:
-                            errors.append(f"Line {i}: Unmatched quote")
-        
-        if in_multiline:
-            errors.append("Unclosed multiline value (missing semicolon)")
-            
-        return errors
-
-    def save_to_file(self, filepath):
-        try:
-            with open(filepath, "w") as file:
-                content = self.text_editor.toPlainText().strip()
-                file.write(content)
-            self.current_file = filepath
-            self.modified = False
-            self.update_status_bar()
-            QMessageBox.information(self, "Success", 
-                                  f"File saved successfully:\n{filepath}")
-            self.setWindowTitle(f"EDCIF-check - {filepath}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save file:\n{e}")
+        return self.validation_controller.validate_cif()
 
     def check_line(self, prefix, default_value=None, multiline=False, description=""):
         """Check and potentially update a CIF field value."""
-        removable_chars = "'"
-        lines = self.text_editor.toPlainText().splitlines()
-        
-        for i, line in enumerate(lines):
-            if line.startswith(prefix):
-                current_value = " ".join(line.split()[1:])
-                value, result = CIFInputDialog.getText(
-                    self, "Edit Line",
-                    f"Edit the line:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
-                    current_value, default_value)
-                
-                if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
-                    return result
-                elif result == QDialog.DialogCode.Accepted and value:
-                    # Preserve original quoting style - only quote if value has spaces or special chars
-                    stripped_value = value.strip(removable_chars)
-                    if ' ' in stripped_value or ',' in stripped_value:
-                        formatted_value = f"'{stripped_value}'"
-                    else:
-                        formatted_value = stripped_value
-                    lines[i] = f"{prefix} {formatted_value}"
-                    self.text_editor.setText("\n".join(lines))
-                return result
-
-        QMessageBox.warning(self, "Line Not Found",
-                          f"The line starting with '{prefix}' was not found.")
-        return self.add_missing_line(prefix, lines, default_value, multiline, description)
+        return self.validation_controller.check_line(prefix, default_value, multiline, description)
 
     def add_missing_line(self, prefix, lines, default_value=None, multiline=False, description=""):
-        """Add a missing CIF field with value."""
-        value, result = CIFInputDialog.getText(
-            self, "Add Missing Line",
-            f"The line starting with '{prefix}' is missing.\n\nDescription: {description}\nSuggested value: {default_value}",
-            default_value if default_value else "", default_value)
-        
-        if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
-            return result
-            
-        removable_chars = "'"
-        if result != QDialog.DialogCode.Accepted:
-            return result
-            
-        if not value:
-            value = "?"
-
-        stripped_value = value.strip(removable_chars)
-        if multiline:
-            insert_index = len(lines)
-            for i, line in enumerate(lines):
-                if line.startswith(prefix.split("_")[0]):
-                    insert_index = i + 1
-            lines.insert(insert_index, 
-                        f"{prefix} \n;\n{stripped_value}\n;")
-        else:
-            # Only quote if value has spaces or special chars
-            if ' ' in stripped_value or ',' in stripped_value:
-                formatted_value = f"'{stripped_value}'"
-            else:
-                formatted_value = stripped_value
-            lines.append(f"{prefix} {formatted_value}")
-        
-        self.text_editor.setText("\n".join(lines))
-        return result    
+        """Add a missing CIF field with value.""" 
+        # This functionality is now handled by ValidationController
+        # But we need to maintain the interface for backward compatibility
+        return self.validation_controller.check_line(prefix, default_value, multiline, description)    
     
     def check_line_with_config(self, prefix, default_value=None, multiline=False, description="", config=None):
         """Check and potentially update a CIF field value with configuration options."""
-        if config is None:
-            config = {'auto_fill_missing': False, 'skip_matching_defaults': False}
-        
-        # Check if this field is deprecated
         if self.dict_manager.is_field_deprecated(prefix):
             modern_equivalent = self.dict_manager.get_modern_equivalent(prefix, prefer_format="CIF1")
             if modern_equivalent:
@@ -608,34 +589,9 @@ class CIFEditor(QMainWindow):
     
     def add_missing_line_with_config(self, prefix, lines, default_value=None, multiline=False, description="", config=None):
         """Add a missing CIF field with value, respecting configuration options."""
-        if config is None:
-            config = {'auto_fill_missing': False, 'skip_matching_defaults': False}
-        
-        # If auto_fill_missing is enabled, add the field silently with default value
-        if config.get('auto_fill_missing', False) and default_value:
-            removable_chars = "'"
-            stripped_value = str(default_value).strip(removable_chars)
-            
-            if multiline:
-                insert_index = len(lines)
-                for i, line in enumerate(lines):
-                    if line.startswith(prefix.split("_")[0]):
-                        insert_index = i + 1
-                lines.insert(insert_index, 
-                            f"{prefix} \n;\n{stripped_value}\n;")
-            else:
-                # Only quote if value has spaces or special chars
-                if ' ' in stripped_value or ',' in stripped_value:
-                    formatted_value = f"'{stripped_value}'"
-                else:
-                    formatted_value = stripped_value
-                lines.append(f"{prefix} {formatted_value}")
-            
-            self.text_editor.setText("\n".join(lines))
-            return QDialog.DialogCode.Accepted
-        
-        # Otherwise, use the normal missing line dialog
-        return self.add_missing_line(prefix, lines, default_value, multiline, description)
+        return self.validation_controller.add_missing_line_with_config(
+            prefix, lines, default_value, multiline, description, config
+        )
     
     def _replace_deprecated_field(self, deprecated_field, modern_field):
         """Replace a deprecated field with its modern equivalent in the CIF content"""
@@ -732,7 +688,7 @@ class CIFEditor(QMainWindow):
             # Generate updated CIF content and update the text editor
             updated_cif = self.cif_parser.generate_cif_content()
             self.text_editor.setText(updated_cif)
-            self.modified = True
+            self._set_modified()
             self.update_status_bar()
             
             return QDialog.DialogCode.Accepted
@@ -871,288 +827,10 @@ class CIFEditor(QMainWindow):
     
     def start_checks(self):
         """Start checking CIF fields using the selected field definition set."""
-        # Validate field set selection
-        if self.current_field_set == 'Custom':
-            if not self.custom_field_rules_file:
-                QMessageBox.warning(
-                    self,
-                    "No Custom File Selected",
-                    "Please select a custom field definition file first."
-                )
-                return
-            
-            # Check if custom field set is loaded
-            fields = self.field_checker.get_field_set('Custom')
-            if not fields:
-                QMessageBox.warning(
-                    self,
-                    "Custom File Not Loaded",
-                    "The custom field definition file could not be loaded. "
-                    "Please select a valid file."
-                )
-                return
-        
-        # Mandatory validation before starting checks (if not done already)
-        if not self._ensure_field_rules_validated():
-            return  # User cancelled or validation failed
-        
-        # Show configuration dialog first
-        config_dialog = CheckConfigDialog(self)
-        if config_dialog.exec() != QDialog.DialogCode.Accepted:
-            return  # User cancelled
-        
-        # Get configuration settings
-        config = config_dialog.get_config()
-        
-        # Store the initial state for potential restore
-        initial_state = self.text_editor.toPlainText()
-        
-        # Single field set processing
-        success = self._process_single_field_set(config, initial_state)
-        if not success:
-            return
-        
-        # If we get here, checks completed successfully
-        if config.get('reformat_after_checks', False):
-            self.reformat_file()
-        
-        self.setWindowTitle("EDCIF-check")
-        QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
-
-    def _process_single_field_set(self, config, initial_state):
-        """Process a single field set (3DED, HP, or Custom)."""
-        try:
-            # Special handling for 3DED: Check CIF format compatibility
-            if self.current_field_set == '3DED':
-                # Detect CIF format of current file
-                content = self.text_editor.toPlainText()
-                cif_format = self.dict_manager.detect_cif_format(content)
-                
-                # Load appropriate 3DED rules based on CIF format
-                field_rules_dir = get_resource_path('field_rules')
-                if cif_format.upper() == 'CIF1':
-                    # Load CIF1 version of 3DED rules
-                    cif1_rules_path = os.path.join(field_rules_dir, '3ded_cif1.cif_rules')
-                    if os.path.exists(cif1_rules_path):
-                        self.field_checker.load_field_set('3DED', cif1_rules_path)
-                        QMessageBox.information(
-                            self, 
-                            "CIF Format Compatibility", 
-                            f"Detected CIF1 format. Automatically switched to CIF1-compatible 3D ED field rules."
-                        )
-                    else:
-                        QMessageBox.warning(
-                            self, 
-                            "Compatibility Issue", 
-                            f"CIF1 format detected, but CIF1-compatible 3D ED rules not found.\n"
-                            f"Using default CIF2 rules which may cause validation issues."
-                        )
-                else:
-                    # Load default CIF2 version of 3DED rules
-                    default_rules_path = os.path.join(field_rules_dir, '3ded.cif_rules')
-                    if os.path.exists(default_rules_path):
-                        self.field_checker.load_field_set('3DED', default_rules_path)
-            
-            # Get the selected field set
-            fields = self.field_checker.get_field_set(self.current_field_set)
-            if not fields:
-                QMessageBox.warning(self, "Warning", f"No {self.current_field_set} field definitions loaded.")
-                return False
-            
-            # Update window title to show which field set is being used
-            field_set_display = {
-                '3DED': '3D ED',
-                'Custom': f'Custom ({os.path.basename(self.custom_field_rules_file) if self.custom_field_rules_file else "Unknown"})'
-            }
-            
-            self.setWindowTitle(f"EDCIF-check - Checking with {field_set_display.get(self.current_field_set, self.current_field_set)} fields")
-            
-            # Parse the current CIF content
-            content = self.text_editor.toPlainText()
-            self.cif_parser.parse_file(content)
-            
-            # For custom sets, handle DELETE/EDIT operations first
-            if self.current_field_set == 'Custom':
-                current_content = content
-                operations_applied = []
-                
-                for field_def in fields:
-                    if hasattr(field_def, 'action'):
-                        if field_def.action == 'DELETE':
-                            lines = current_content.splitlines()
-                            lines, deleted = self.field_checker._delete_field(lines, field_def.name)
-                            if deleted:
-                                operations_applied.append(f"DELETED: {field_def.name}")
-                                current_content = '\n'.join(lines)
-                        elif field_def.action == 'EDIT':
-                            lines = current_content.splitlines()
-                            lines, edited = self.field_checker._edit_field(lines, field_def.name, field_def.default_value)
-                            if edited:
-                                operations_applied.append(f"EDITED: {field_def.name} -> {field_def.default_value}")
-                                current_content = '\n'.join(lines)
-                
-                # Update content after DELETE/EDIT operations
-                if operations_applied:
-                    self.text_editor.setText(current_content)
-                    ops_summary = '\n'.join(operations_applied)
-                    QMessageBox.information(self, "Operations Applied", 
-                                          f"Applied {len(operations_applied)} operations:\n\n{ops_summary}")
-            
-            # Process CHECK actions (standard field checking)
-            for field_def in fields:
-                # Skip DELETE/EDIT actions as they're already processed
-                if hasattr(field_def, 'action') and field_def.action in ['DELETE', 'EDIT']:
-                    continue
-                    
-                result = self.check_line_with_config(
-                    field_def.name,
-                    field_def.default_value,
-                    False,
-                    field_def.description,
-                    config
-                )
-                
-                if result == RESULT_ABORT:
-                    self.text_editor.setText(initial_state)
-                    self.setWindowTitle("EDCIF-check")
-                    QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                    return False
-                elif result == RESULT_STOP_SAVE:
-                    break
-            
-            # Apply special 3DED handling if needed
-            if self.current_field_set == '3DED':
-                self._apply_3ded_special_checks(config, initial_state)
-            
-            return True
-            
-        except Exception as e:
-            self.text_editor.setText(initial_state)
-            self.setWindowTitle("EDCIF-check")
-            QMessageBox.critical(self, "Error During Checks", f"An error occurred: {str(e)}")
-            return False
-    
-    def _apply_3ded_special_checks(self, config, initial_state):
-        """Apply special 3DED checks for space groups and absolute configuration."""
-        sohncke_groups = [1, 3, 4, 5, 16, 17, 18, 19, 20, 21, 22, 23, 24, 75, 76, 77, 78, 79, 80, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 143, 144, 145, 146, 149, 150, 151, 152, 153, 154, 155, 168, 169, 170, 171, 172, 173, 177, 178, 179, 180, 181, 182, 195, 196, 197, 198, 199, 207, 208, 209, 210, 211, 212, 213, 214]
-        SG_number = None
-        lines = self.text_editor.toPlainText().splitlines()
-        
-        # Find space group number
-        for line in lines:
-            if line.startswith("_space_group_IT_number"):
-                parts = line.split()
-                if len(parts) > 1:
-                    try:
-                        SG_number = int(parts[1].strip("'\""))
-                    except Exception:
-                        pass
-                break
-        
-        # Check if we need absolute configuration handling
-        if SG_number is not None and SG_number in sohncke_groups:
-            # Detect CIF format to use appropriate field names
-            content = self.text_editor.toPlainText()
-            detected_version = self.dict_manager.detect_cif_version(content)
-            
-            # Determine field names based on CIF format
-            if detected_version == CIFVersion.CIF2:
-                abs_config_field = "_chemical.absolute_configuration"
-                z_score_field = "_refine_ls.abs_structure_z-score"
-            else:
-                # Use CIF1 format for CIF1, MIXED, and UNKNOWN
-                abs_config_field = "_chemical_absolute_configuration"
-                z_score_field = "_refine_ls_abs_structure_z-score"
-            
-            found = False
-            for line in lines:
-                if line.startswith(abs_config_field):
-                    found = True
-                    break
-            
-            if found:
-                result = self.check_line_with_config(
-                    abs_config_field, 
-                    default_value='dyn', 
-                    multiline=False, 
-                    description="Specify if/how absolute structure was determined.", 
-                    config=config
-                )
-                if result == RESULT_ABORT:
-                    self.text_editor.setText(initial_state)
-                    self.setWindowTitle("EDCIF-check")
-                    QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                    return False
-                elif result == RESULT_STOP_SAVE:
-                    return True
-            else:
-                result = self.add_missing_line_with_config(
-                    abs_config_field, 
-                    lines, 
-                    default_value='dyn', 
-                    multiline=False, 
-                    description="Specify if/how absolute structure was determined.", 
-                    config=config
-                )
-                if result == RESULT_ABORT:
-                    self.text_editor.setText(initial_state)
-                    self.setWindowTitle("EDCIF-check")
-                    QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                    return False
-                elif result == RESULT_STOP_SAVE:
-                    return True
-            
-            # Check for z-score if configuration is 'dyn'
-            lines = self.text_editor.toPlainText().splitlines()  # Re-get lines after potential changes
-            chemical_absolute_config_value = None
-            for line in lines:
-                if line.startswith(abs_config_field):
-                    parts = line.split()
-                    if len(parts) > 1:
-                        chemical_absolute_config_value = parts[1].strip("'\"")
-                        break
-            
-            if chemical_absolute_config_value == 'dyn':
-                # Check if z-score field exists
-                found_z_score = False
-                for line in lines:
-                    if line.startswith(z_score_field):
-                        found_z_score = True
-                        break
-                
-                if found_z_score:
-                    result = self.check_line_with_config(
-                        z_score_field, 
-                        default_value='', 
-                        multiline=False, 
-                        description="Z-score for absolute structure determination from dynamical refinement.", 
-                        config=config
-                    )
-                    if result == RESULT_ABORT:
-                        self.text_editor.setText(initial_state)
-                        self.setWindowTitle("EDCIF-check")
-                        QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                        return False
-                    elif result == RESULT_STOP_SAVE:
-                        return True
-                else:
-                    result = self.add_missing_line_with_config(
-                        z_score_field, 
-                        lines, 
-                        default_value='', 
-                        multiline=False, 
-                        description="Z-score for absolute structure determination from dynamical refinement.", 
-                        config=config
-                    )
-                    if result == RESULT_ABORT:
-                        self.text_editor.setText(initial_state)
-                        self.setWindowTitle("EDCIF-check")
-                        QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                        return False
-                    elif result == RESULT_STOP_SAVE:
-                        return True
-        
-        return True
+        success = self.validation_controller.start_checks()
+        if success:
+            # Handle reformat if needed (would need to be passed to validation controller)
+            pass
 
     def reformat_file(self):
         """Reformat CIF file to handle long lines and properly format values, preserving semicolon blocks."""
@@ -1191,7 +869,7 @@ class CIFEditor(QMainWindow):
         return "\n".join(lines)
 
     def handle_text_changed(self):
-        self.modified = True
+        self._set_modified()
         self.update_status_bar()
         
         # Schedule CIF version detection (delayed to avoid constant updates)
@@ -1223,8 +901,8 @@ class CIFEditor(QMainWindow):
             self.cursor_label.setStyleSheet("")
 
     def update_status_bar(self):
-        path = self.current_file if self.current_file else "Untitled"
-        modified = "*" if self.modified else ""
+        path = self.file_manager.get_current_filepath() or "Untitled"
+        modified = "*" if self.file_manager.is_file_modified() else ""
         self.path_label.setText(f"{path}{modified} | ")
 
     def update_dictionary_status(self):
@@ -1341,7 +1019,7 @@ class CIFEditor(QMainWindow):
             converted_content, changes = self.format_converter.convert_to_cif1(content)
             if converted_content != content:
                 self.text_editor.setText(converted_content)
-                self.modified = True
+                self._set_modified()
                 self.current_cif_version = CIFVersion.CIF1
                 self.update_cif_version_display()
                 change_summary = f"Made {len(changes)} changes:\n" + "\n".join(changes[:5])
@@ -1367,7 +1045,7 @@ class CIFEditor(QMainWindow):
             converted_content, changes = self.format_converter.convert_to_cif2(content)
             if converted_content != content:
                 self.text_editor.setText(converted_content)
-                self.modified = True
+                self._set_modified()
                 self.current_cif_version = CIFVersion.CIF2
                 self.update_cif_version_display()
                 change_summary = f"Made {len(changes)} changes:\n" + "\n".join(changes[:5])
@@ -1424,7 +1102,7 @@ class CIFEditor(QMainWindow):
             
             if fixed_content != content:
                 self.text_editor.setText(fixed_content)
-                self.modified = True
+                self._set_modified()
                 self.current_cif_version = target_version
                 self.update_cif_version_display()
                 change_summary = f"Made {len(changes)} changes:\n" + "\n".join(changes[:5])
@@ -1496,7 +1174,7 @@ class CIFEditor(QMainWindow):
                 
                 if changes:
                     self.text_editor.setText(resolved_content)
-                    self.modified = True
+                    self._set_modified()
                     
                     change_summary = f"Successfully resolved {len(conflicts)} field alias conflicts:\n\n"
                     for change in changes:
@@ -1621,7 +1299,7 @@ class CIFEditor(QMainWindow):
                 
                 if changes_made:
                     self.text_editor.setText(updated_content)
-                    self.modified = True
+                    self._set_modified()
                     
                     change_summary = f"Successfully updated {len(changes_made)} deprecated field(s):\n\n"
                     for change in changes_made:
@@ -1673,7 +1351,7 @@ class CIFEditor(QMainWindow):
             
             # Update the editor
             self.text_editor.setText(updated_content)
-            self.modified = True
+            self._set_modified()
             
             # Show results
             if "Added" in report:
@@ -1700,181 +1378,35 @@ class CIFEditor(QMainWindow):
 
     def load_custom_dictionary(self):
         """Load a custom CIF dictionary file."""
-        try:
-            file_filter = "CIF Dictionary Files (*.dic);;All Files (*.*)"
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, "Select CIF Dictionary File", "", file_filter)
-            
-            if not file_path:
-                return  # User cancelled
-            
-            # Test if the file can be loaded
-            from utils.cif_dictionary_manager import CIFDictionaryManager
-            from utils.cif_format_converter import CIFFormatConverter
-            
-            # Show loading message
-            self.status_bar.showMessage("Loading dictionary...")
-            
-            # Create new dictionary manager with custom path
-            new_dict_manager = CIFDictionaryManager(file_path)
-            
-            # Test that it loads correctly by accessing the mappings
-            # This will trigger the lazy loading and catch any parse errors
-            new_dict_manager._ensure_loaded()
-            
-            # Check that the dictionary actually contains mappings
-            if not new_dict_manager._cif1_to_cif2 and not new_dict_manager._cif2_to_cif1:
-                raise ValueError("The selected file does not appear to contain valid CIF dictionary mappings.")
-            
-            # If we get here, the dictionary loaded successfully
-            self.dict_manager = new_dict_manager
-            self.format_converter = CIFFormatConverter(self.dict_manager)
-            
-            # Update status displays
-            self.update_dictionary_status()
-            self.status_bar.showMessage(f"Successfully loaded dictionary: {os.path.basename(file_path)}", 5000)
-            
-            # Show success message
-            QMessageBox.information(self, "Dictionary Loaded", 
-                                  f"Successfully loaded CIF dictionary:\n{file_path}")
-                                  
-        except FileNotFoundError:
-            QMessageBox.critical(self, "File Error", 
-                               f"Dictionary file not found:\n{file_path}")
-            self.status_bar.showMessage("Dictionary loading failed", 3000)
-        except Exception as e:
-            QMessageBox.critical(self, "Dictionary Error", 
-                               f"Failed to load CIF dictionary:\n{str(e)}\n\nPlease ensure the file is a valid CIF dictionary.")
-            self.status_bar.showMessage("Dictionary loading failed", 3000)
+        success = self.settings_manager.load_custom_dictionary()
+        if success:
+            # Update local references to the new dictionary manager
+            self.dict_manager = self.settings_manager.get_dictionary_manager()
+            self.format_converter = self.settings_manager.get_format_converter()
+            # Update validation controller with new dictionary components
+            self.validation_controller.set_dictionary_components(self.dict_manager, self.format_converter)
 
     def add_additional_dictionary(self):
         """Add an additional CIF dictionary to extend field coverage."""
-        try:
-            file_filter = "CIF Dictionary Files (*.dic);;All Files (*.*)"
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, "Select Additional CIF Dictionary", "", file_filter)
-            
-            if not file_path:
-                return  # User cancelled
-            
-            # Show loading message
-            self.status_bar.showMessage("Adding dictionary...")
-            
-            # Add the dictionary to the existing manager
-            success = self.dict_manager.add_dictionary(file_path)
-            
-            if success:
-                # Update the format converter with the enhanced dictionary manager
-                self.format_converter = CIFFormatConverter(self.dict_manager)
-                
-                # Update status displays
-                self.update_dictionary_status()
-                
-                dict_name = os.path.basename(file_path)
-                self.status_bar.showMessage(f"Successfully added dictionary: {dict_name}", 5000)
-                
-                # Get dictionary info for the success message
-                dict_info = self.dict_manager.get_dictionary_info()
-                total_dicts = dict_info['total_dictionaries']
-                total_mappings = dict_info['total_cif1_mappings']
-                
-                QMessageBox.information(self, "Dictionary Added", 
-                                      f"Successfully added CIF dictionary:\n{file_path}\n\n"
-                                      f"Total dictionaries loaded: {total_dicts}\n"
-                                      f"Total field mappings: {total_mappings}")
-            else:
-                self.status_bar.showMessage("Failed to add dictionary", 3000)
-                                  
-        except FileNotFoundError:
-            QMessageBox.critical(self, "File Error", 
-                               f"Dictionary file not found:\n{file_path}")
-            self.status_bar.showMessage("Dictionary adding failed", 3000)
-        except ValueError as e:
-            QMessageBox.critical(self, "Dictionary Error", 
-                               f"Invalid dictionary file:\n{str(e)}")
-            self.status_bar.showMessage("Dictionary adding failed", 3000)
-        except Exception as e:
-            QMessageBox.critical(self, "Dictionary Error", 
-                               f"Failed to add CIF dictionary:\n{str(e)}\n\nPlease ensure the file is a valid CIF dictionary.")
-            self.status_bar.showMessage("Dictionary adding failed", 3000)
+        success = self.settings_manager.add_additional_dictionary()
+        if success:
+            # Update local references to the enhanced dictionary manager
+            self.dict_manager = self.settings_manager.get_dictionary_manager()
+            self.format_converter = self.settings_manager.get_format_converter()
+            # Update validation controller with enhanced dictionary components
+            self.validation_controller.set_dictionary_components(self.dict_manager, self.format_converter)
 
     def show_dictionary_info(self):
         """Show detailed dictionary information dialog."""
-        try:
-            dialog = DictionaryInfoDialog(self.dict_manager, self)
-            dialog.exec()
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            print(f"Dictionary info dialog error: {error_details}")
-            QMessageBox.critical(self, "Error", 
-                               f"Failed to show dictionary information:\n{str(e)}\n\nCheck console for details.")
+        self.settings_manager.show_dictionary_info()
     
     def suggest_dictionaries(self):
         """Analyze current CIF content and suggest relevant dictionaries."""
-        try:
-            # Get current CIF content
-            cif_content = self.text_editor.toPlainText().strip()
-            
-            if not cif_content:
-                QMessageBox.information(self, "No CIF Content", 
-                                      "Please open or write a CIF file first to get dictionary suggestions.")
-                return
-            
-            # Analyze CIF and get suggestions
-            suggestions = self.dict_manager.suggest_dictionaries_for_cif(cif_content)
-            cif_format = self.dict_manager.detect_cif_format(cif_content)
-            
-            # Status update callback
-            def update_status(message: str):
-                """Update the status bar with a message."""
-                self.status_bar.showMessage(message, 5000)
-                self.update_dictionary_status()
-            
-            # Show suggestions dialog with dictionary manager for downloading
-            show_dictionary_suggestions(
-                suggestions, 
-                cif_format, 
-                None,  # Deprecated load_callback
-                self.dict_manager,  # Dictionary manager for downloading
-                update_status,  # Status update callback
-                self
-            )
-            
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            print(f"Dictionary suggestion error: {error_details}")
-            QMessageBox.critical(self, "Error", 
-                               f"Failed to analyze CIF for dictionary suggestions:\n{str(e)}\n\nCheck console for details.")
+        self.settings_manager.suggest_dictionaries()
     
     def prompt_for_dictionary_suggestions(self, cif_content: str):
         """Prompt user to get dictionary suggestions when opening a CIF file."""
-        try:
-            # Quick check if there are any potential suggestions
-            suggestions = self.dict_manager.suggest_dictionaries_for_cif(cif_content)
-            
-            if not suggestions:
-                return  # No suggestions available, don't prompt
-            
-            # Ask user if they want to see dictionary suggestions
-            reply = QMessageBox.question(
-                self, 
-                "Dictionary Suggestions Available",
-                f"This CIF file appears to contain specialized data that could benefit from additional dictionaries.\n\n"
-                f"Found {len(suggestions)} dictionary suggestion(s) that may enhance field validation and recognition.\n\n"
-                "Would you like to see the suggestions?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                # Use existing suggest_dictionaries method to show the dialog
-                self.suggest_dictionaries()
-                
-        except Exception as e:
-            # Don't show error for this - it's just a convenience prompt
-            print(f"Dictionary suggestion prompt error: {e}")
+        self.settings_manager.prompt_for_dictionary_suggestions(cif_content)
     
     
     def _ensure_field_rules_validated(self) -> bool:
